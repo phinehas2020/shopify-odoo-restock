@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="server_action_run_restock" model="ir.actions.server">
+    <field name="name">Run Shopify Restock</field>
+    <field name="state">code</field>
+    <field name="binding_model_id" eval="False"/>
+    <field name="code">action = env.ref('odoo_shopify_restock.action_open_shopify_restock_runs').sudo().read()[0]
+result = env['shopify.restock.service'].run_restock_check(send_email=True)
+action</field>
+  </record>
+</odoo>

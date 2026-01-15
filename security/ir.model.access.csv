@@ -1,0 +1,14 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_shopify_restock_run_user,access.shopify.restock.run.user,model_shopify_restock_run,base.group_user,1,1,1,0
+access_shopify_restock_run_admin,access.shopify.restock.run.admin,model_shopify_restock_run,base.group_system,1,1,1,1
+access_shopify_restock_wizard_user,access.shopify.restock.wizard.user,model_shopify_restock_wizard,base.group_user,1,0,1,0
+access_shopify_retail_inventory_wizard_user,access.shopify.retail.inventory.wizard.user,model_shopify_retail_inventory_wizard,base.group_user,1,1,1,0
+access_shopify_restock_location_admin,access.shopify.restock.location.admin,model_shopify_restock_location,base.group_system,1,1,1,1
+access_shopify_restock_location_user,access.shopify.restock.location.user,model_shopify_restock_location,base.group_user,1,0,0,0
+access_shopify_restock_item_user,access.shopify.restock.item.user,model_shopify_restock_item,base.group_user,1,1,1,0
+access_shopify_restock_item_admin,access.shopify.restock.item.admin,model_shopify_restock_item,base.group_system,1,1,1,1
+access_ir_config_parameter_user,access.ir.config.parameter.user,base.model_ir_config_parameter,base.group_user,1,0,0,0
+access_mail_mail_user,access.mail.mail.user,mail.model_mail_mail,base.group_user,1,1,1,0
+access_ir_actions_act_window_user,access.ir.actions.act.window.user,base.model_ir_actions_act_window,base.group_user,1,0,0,0
+access_ir_model_data_user,access.ir.model.data.user,base.model_ir_model_data,base.group_user,1,0,0,0
+access_hr_employee_user,access.hr.employee.user,hr.model_hr_employee,base.group_user,1,0,0,0

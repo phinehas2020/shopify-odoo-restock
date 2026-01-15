@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  
+  <record id="view_shopify_restock_item_tree" model="ir.ui.view">
+    <field name="name">shopify.restock.item.tree</field>
+    <field name="model">shopify.restock.item</field>
+    <field name="arch" type="xml">
+      <list>
+        <field name="run_timestamp"/>
+        <field name="urgency"/>
+        <field name="product_title"/>
+        <field name="variant_title"/>
+        <field name="sku"/>
+        <field name="current_qty"/>
+        <field name="restock_level"/>
+        <field name="restock_amount"/>
+        <field name="product_url"/>
+      </list>
+    </field>
+  </record>
+  <record id="view_shopify_restock_item_form" model="ir.ui.view">
+    <field name="name">shopify.restock.item.form</field>
+    <field name="model">shopify.restock.item</field>
+    <field name="arch" type="xml">
+      <form string="Restock Item">
+        <sheet>
+          <group>
+            <field name="run_timestamp"/>
+            <field name="run_id"/>
+            <field name="urgency"/>
+            <field name="product_title"/>
+            <field name="variant_title"/>
+            <field name="sku"/>
+            <field name="product_handle"/>
+            <field name="product_url"/>
+          </group>
+          <group string="Stock">
+            <field name="current_qty"/>
+            <field name="restock_level"/>
+            <field name="restock_amount"/>
+          </group>
+        </sheet>
+      </form>
+    </field>
+  </record>
+  <!-- Open items in form-first with pager for one-at-a-time navigation -->
+  <record id="action_open_shopify_restock_items" model="ir.actions.act_window">
+    <field name="name">Restock Items</field>
+    <field name="res_model">shopify.restock.item</field>
+    <field name="view_mode">form,list</field>
+    <field name="context">{"search_default_order": "run_timestamp desc"}</field>
+  </record>
+</odoo>

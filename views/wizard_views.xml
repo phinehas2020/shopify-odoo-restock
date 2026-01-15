@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_shopify_restock_wizard_form" model="ir.ui.view">
+    <field name="name">shopify.restock.wizard.form</field>
+    <field name="model">shopify.restock.wizard</field>
+    <field name="arch" type="xml">
+      <form string="Shopify Restock">
+        <group>
+          <field name="employee_id" options='{"no_create": true}'/>
+          <field name="location_id" options='{"no_create": false}'/>
+        </group>
+        <footer>
+          <button name="action_run" type="object" class="btn-primary" string="Run now"/>
+          <button string="Close" class="btn-secondary" special="cancel"/>
+        </footer>
+      </form>
+    </field>
+  </record>
+
+  <record id="action_open_shopify_restock_wizard" model="ir.actions.act_window">
+    <field name="name">Shopify Restock</field>
+    <field name="res_model">shopify.restock.wizard</field>
+    <field name="view_mode">form</field>
+    <field name="target">new</field>
+    <field name="view_id" ref="view_shopify_restock_wizard_form"/>
+  </record>
+
+  <record id="view_shopify_retail_inventory_wizard_form" model="ir.ui.view">
+    <field name="name">shopify.retail.inventory.wizard.form</field>
+    <field name="model">shopify.retail.inventory.wizard</field>
+    <field name="arch" type="xml">
+      <form string="Retail Inventory Report">
+        <group>
+          <field name="location_id" options='{"no_create": false}'/>
+        </group>
+        <group invisible="not report_file">
+          <field name="report_row_count" readonly="1"/>
+          <field name="report_filename" invisible="1"/>
+          <field name="report_file" filename="report_filename" readonly="1"/>
+        </group>
+        <footer>
+          <button name="action_generate_report" type="object" class="btn-primary" string="Generate CSV"/>
+          <button string="Close" class="btn-secondary" special="cancel"/>
+        </footer>
+      </form>
+    </field>
+  </record>
+
+  <record id="action_open_shopify_retail_inventory_wizard" model="ir.actions.act_window">
+    <field name="name">Retail Inventory Report</field>
+    <field name="res_model">shopify.retail.inventory.wizard</field>
+    <field name="view_mode">form</field>
+    <field name="target">new</field>
+    <field name="view_id" ref="view_shopify_retail_inventory_wizard_form"/>
+  </record>
+
+  <!-- Ensure Items action exists before menus -->
+  <record id="action_open_shopify_restock_items" model="ir.actions.act_window">
+    <field name="name">Restock Items</field>
+    <field name="res_model">shopify.restock.item</field>
+    <field name="view_mode">list,form</field>
+  </record>
+
+  
+
+  <record id="view_shopify_restock_run_tree" model="ir.ui.view">
+    <field name="name">shopify.restock.run.tree</field>
+    <field name="model">shopify.restock.run</field>
+    <field name="arch" type="xml">
+      <list>
+        <field name="create_date"/>
+        <field name="rss_item_count"/>
+        <field name="has_restock_alerts"/>
+        <field name="email_sent"/>
+        <field name="email_to"/>
+      </list>
+    </field>
+  </record>
+
+  <record id="view_shopify_restock_run_form" model="ir.ui.view">
+    <field name="name">shopify.restock.run.form</field>
+    <field name="model">shopify.restock.run</field>
+    <field name="arch" type="xml">
+      <form string="Shopify Restock Run">
+        <header>
+          <button name="%(odoo_shopify_restock.action_run_restock_button)d" type="action" class="btn-primary" string="Run Now"/>
+        </header>
+        <sheet>
+          <group>
+            <field name="report_timestamp"/>
+            <field name="total_products_found"/>
+            <field name="total_products_checked"/>
+            <field name="rss_item_count"/>
+            <field name="has_restock_alerts"/>
+            <field name="email_sent"/>
+            <field name="email_to"/>
+            <field name="error_message"/>
+          </group>
+          <group string="Raw JSON">
+            <field name="rss_items_json" widget="text"/>
+          </group>
+        </sheet>
+      </form>
+    </field>
+  </record>
+
+  <record id="action_open_shopify_restock_runs" model="ir.actions.act_window">
+    <field name="name">Restock Runs</field>
+    <field name="res_model">shopify.restock.run</field>
+    <field name="view_mode">list,form</field>
+  </record>
+</odoo>

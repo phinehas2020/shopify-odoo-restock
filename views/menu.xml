@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <menuitem id="menu_shopify_restock_root" name="Shopify Restock" sequence="10" action="action_open_shopify_restock_runs" web_icon="odoo_shopify_restock,static/description/icon.svg"/>
+  <menuitem id="menu_shopify_restock_run_now" name="Run Now" parent="menu_shopify_restock_root" action="action_open_shopify_restock_wizard" sequence="5"/>
+  <menuitem id="menu_shopify_retail_inventory_report" name="Retail Inventory" parent="menu_shopify_restock_root" action="action_open_shopify_retail_inventory_wizard" sequence="7"/>
+  <menuitem id="menu_shopify_restock_settings" name="Settings" parent="menu_shopify_restock_root" action="action_shopify_restock_settings" sequence="10" groups="base.group_system"/>
+
+  <menuitem id="menu_shopify_restock_items" name="Restock Items" parent="menu_shopify_restock_root" action="action_open_shopify_restock_items" sequence="15"/>
+  <menuitem id="menu_shopify_restock_runs" name="Runs" parent="menu_shopify_restock_root" action="action_open_shopify_restock_runs" sequence="20"/>
+  <menuitem id="menu_shopify_restock_locations" name="Locations" parent="menu_shopify_restock_root" action="action_open_shopify_restock_locations" sequence="25"/>
+</odoo>

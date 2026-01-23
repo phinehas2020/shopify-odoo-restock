@@ -18,8 +18,6 @@
           </group>
           <group string="To-do">
             <field name="restock_project_id"/>
-            <field name="restock_employee_id"/>
-            <field name="restock_email_to" readonly="1"/>
           </group>
           <group string="Odoo Inventory">
             <field name="restock_odoo_location_id"/>

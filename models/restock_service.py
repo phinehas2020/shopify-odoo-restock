@@ -150,10 +150,8 @@ class ShopifyRestockService(models.AbstractModel):
         api_version = ICP.get_param("odoo_shopify_restock.api_version") or "2023-04"
         location_id_global = ICP.get_param("odoo_shopify_restock.location_id_global") or ""
         location_id_numeric = ICP.get_param("odoo_shopify_restock.location_id_numeric") or ""
-        email_to = ICP.get_param("odoo_shopify_restock.email_to") or ""
         webhook_enabled = (ICP.get_param("odoo_shopify_restock.webhook_enabled") or "0") == "1"
         webhook_url = ICP.get_param("odoo_shopify_restock.webhook_url") or ""
-        employee_id = ICP.get_param("odoo_shopify_restock.employee_id") or "0"
         project_id = ICP.get_param("odoo_shopify_restock.project_id") or "0"
         odoo_location_id = ICP.get_param("odoo_shopify_restock.odoo_location_id") or "0"
         
@@ -171,10 +169,8 @@ class ShopifyRestockService(models.AbstractModel):
             "api_version": api_version.strip(),
             "location_id_global": location_id_global.strip(),
             "location_id_numeric": location_id_numeric.strip(),
-            "email_to": email_to.strip(),
             "webhook_enabled": webhook_enabled,
             "webhook_url": webhook_url.strip(),
-            "employee_id": employee_id.strip(),
             "project_id": project_id.strip(),
             "odoo_location_id": odoo_location_id.strip(),
         }
@@ -583,9 +579,12 @@ class ShopifyRestockService(models.AbstractModel):
                 continue
 
     def _get_task_user_id(self, settings: Dict[str, str]) -> Optional[int]:
-        employee_id = settings.get("employee_id")
-        if employee_id and str(employee_id).isdigit():
-            employee = self.env["hr.employee"].sudo().browse(int(employee_id))
+        ctx_user_id = self.env.context.get("restock_user_id")
+        if ctx_user_id and str(ctx_user_id).isdigit():
+            return int(ctx_user_id)
+        ctx_employee_id = self.env.context.get("restock_employee_id")
+        if ctx_employee_id and str(ctx_employee_id).isdigit():
+            employee = self.env["hr.employee"].sudo().browse(int(ctx_employee_id))
             if employee and employee.user_id:
                 return employee.user_id.id
         return None

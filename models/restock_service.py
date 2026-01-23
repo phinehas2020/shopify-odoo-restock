@@ -615,6 +615,7 @@ class ShopifyRestockService(models.AbstractModel):
             return
         project = self._get_restock_project(settings)
         user_id = self._get_task_user_id(settings)
+        task_model = self.env["project.task"]
         for item in items:
             display_title = item.product_title or "Restock Item"
             if item.variant_title and item.variant_title != "Default Title":
@@ -638,7 +639,12 @@ class ShopifyRestockService(models.AbstractModel):
                 "restock_item_id": item.id,
             }
             if user_id:
-                task_vals["user_id"] = user_id
+                if "user_id" in task_model._fields:
+                    task_vals["user_id"] = user_id
+                elif "user_ids" in task_model._fields:
+                    task_vals["user_ids"] = [(6, 0, [user_id])]
+                elif "assigned_ids" in task_model._fields:
+                    task_vals["assigned_ids"] = [(6, 0, [user_id])]
             task = self.env["project.task"].sudo().create(task_vals)
             item.sudo().write({"todo_task_id": task.id})
 

@@ -13,14 +13,6 @@ class ShopifyRestockLocation(models.Model):
 
     active = fields.Boolean(default=True)
 
-    # Per-location webhook settings
-    webhook_enabled = fields.Boolean(
-        string="Post items to webhook",
-        help="If enabled, items for runs using this location will be POSTed to the URL below.",
-        default=False,
-    )
-    webhook_url = fields.Char(string="Webhook URL")
-
     odoo_location_id = fields.Many2one(
         comodel_name="stock.location",
         string="Odoo Stock Location",

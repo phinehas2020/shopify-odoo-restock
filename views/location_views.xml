@@ -29,10 +29,6 @@
           <group string="Odoo Inventory">
             <field name="odoo_location_id"/>
           </group>
-          <group string="Webhook">
-            <field name="webhook_enabled"/>
-            <field name="webhook_url"/>
-          </group>
         </sheet>
       </form>
     </field>

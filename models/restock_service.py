@@ -47,12 +47,6 @@ class ShopifyRestockService(models.AbstractModel):
             except Exception:  # pylint: disable=broad-except
                 email_sent = False
 
-        # Post each item to the webhook if enabled (non-blocking)
-        try:
-            self._post_items_to_webhook(settings, result.get("rss_items", []) or [], location)
-        except Exception:
-            pass
-
         # persist run and items
         run = self.env["shopify.restock.run"].sudo().create({
             "report_timestamp": fields.Datetime.now(),
@@ -150,8 +144,6 @@ class ShopifyRestockService(models.AbstractModel):
         api_version = ICP.get_param("odoo_shopify_restock.api_version") or "2023-04"
         location_id_global = ICP.get_param("odoo_shopify_restock.location_id_global") or ""
         location_id_numeric = ICP.get_param("odoo_shopify_restock.location_id_numeric") or ""
-        webhook_enabled = (ICP.get_param("odoo_shopify_restock.webhook_enabled") or "0") == "1"
-        webhook_url = ICP.get_param("odoo_shopify_restock.webhook_url") or ""
         project_id = ICP.get_param("odoo_shopify_restock.project_id") or "0"
         odoo_location_id = ICP.get_param("odoo_shopify_restock.odoo_location_id") or "0"
         
@@ -169,8 +161,6 @@ class ShopifyRestockService(models.AbstractModel):
             "api_version": api_version.strip(),
             "location_id_global": location_id_global.strip(),
             "location_id_numeric": location_id_numeric.strip(),
-            "webhook_enabled": webhook_enabled,
-            "webhook_url": webhook_url.strip(),
             "project_id": project_id.strip(),
             "odoo_location_id": odoo_location_id.strip(),
         }
@@ -554,29 +544,6 @@ class ShopifyRestockService(models.AbstractModel):
             len(rss_items),
         )
         return result
-
-    def _post_items_to_webhook(self, settings: Dict[str, str], rss_items: List[Dict[str, Any]], location: Optional[models.Model] = None) -> None:
-        # Prefer per-location webhook if provided and enabled
-        if location and getattr(location, "webhook_enabled", False) and getattr(location, "webhook_url", ""):
-            url = location.webhook_url
-        else:
-            if not settings.get("webhook_enabled"):
-                return
-            url = settings.get("webhook_url")
-        if not url:
-            return
-        headers = {"Content-Type": "application/json"}
-        for item in rss_items:
-            payload = {
-                "title": item.get("title"),
-                "guid": item.get("guid") or item.get("id"),
-                "amount": item.get("restock_amount", 0),
-            }
-            try:
-                requests.post(url, headers=headers, json=payload, timeout=30)
-            except Exception:
-                # Ignore webhook failures so the run still succeeds
-                continue
 
     def _get_task_user_id(self, settings: Dict[str, str]) -> Optional[int]:
         ctx_user_id = self.env.context.get("restock_user_id")

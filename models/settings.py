@@ -27,16 +27,6 @@ class ResConfigSettings(models.TransientModel):
         help="e.g. 123456789",
     )
 
-    # Webhook posting (e.g., RSS/Logic App)
-    restock_webhook_enabled = fields.Boolean(
-        string="Post each item to webhook",
-        help="If enabled, each restock item will be POSTed to the configured webhook URL.",
-        default=False,
-    )
-    restock_webhook_url = fields.Char(
-        string="Webhook URL",
-        help="Target URL to POST each restock item as JSON (title, guid, amount).",
-    )
     restock_project_id = fields.Many2one(
         comodel_name="project.project",
         string="Restock Project",
@@ -59,8 +49,6 @@ class ResConfigSettings(models.TransientModel):
             shopify_api_version=ICP.get_param("odoo_shopify_restock.api_version", default="2023-04"),
             shopify_location_id_global=ICP.get_param("odoo_shopify_restock.location_id_global", default=""),
             shopify_location_id_numeric=ICP.get_param("odoo_shopify_restock.location_id_numeric", default=""),
-            restock_webhook_enabled=ICP.get_param("odoo_shopify_restock.webhook_enabled", default="0") == "1",
-            restock_webhook_url=ICP.get_param("odoo_shopify_restock.webhook_url", default=""),
             restock_project_id=int(ICP.get_param("odoo_shopify_restock.project_id", default="0") or 0) or False,
             restock_odoo_location_id=int(ICP.get_param("odoo_shopify_restock.odoo_location_id", default="0") or 0) or False,
         )
@@ -74,7 +62,5 @@ class ResConfigSettings(models.TransientModel):
         ICP.set_param("odoo_shopify_restock.api_version", self.shopify_api_version or "")
         ICP.set_param("odoo_shopify_restock.location_id_global", self.shopify_location_id_global or "")
         ICP.set_param("odoo_shopify_restock.location_id_numeric", self.shopify_location_id_numeric or "")
-        ICP.set_param("odoo_shopify_restock.webhook_enabled", "1" if self.restock_webhook_enabled else "0")
-        ICP.set_param("odoo_shopify_restock.webhook_url", self.restock_webhook_url or "")
         ICP.set_param("odoo_shopify_restock.project_id", str(self.restock_project_id.id or 0))
         ICP.set_param("odoo_shopify_restock.odoo_location_id", str(self.restock_odoo_location_id.id or 0))

@@ -22,10 +22,6 @@
           <group string="Odoo Inventory">
             <field name="restock_odoo_location_id"/>
           </group>
-          <group string="Webhook">
-            <field name="restock_webhook_enabled"/>
-            <field name="restock_webhook_url"/>
-          </group>
         </group>
         <footer>
           <button string="Save" type="object" name="execute" class="btn-primary"/>

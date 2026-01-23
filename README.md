@@ -6,7 +6,7 @@ This module pulls Shopify inventory data, sends restock alerts, and can generate
 - Go to Shopify Restock > Settings.
 - Enter Shopify Store Domain, Access Token, and API Version.
 - Set the Shopify Location IDs (global and numeric) or create locations under Shopify Restock > Locations.
-- Optionally enable the webhook settings.
+- Restock alerts create Odoo to-do tasks for each item.
 
 ## Run Restock Check
 - Go to Shopify Restock > Run Now.

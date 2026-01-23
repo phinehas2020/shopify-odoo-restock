@@ -645,7 +645,13 @@ class ShopifyRestockService(models.AbstractModel):
                     task_vals["user_ids"] = [(6, 0, [user_id])]
                 elif "assigned_ids" in task_model._fields:
                     task_vals["assigned_ids"] = [(6, 0, [user_id])]
-            task = self.env["project.task"].sudo().create(task_vals)
+            task = self.env["project.task"].with_context(
+                mail_create_nosubscribe=True,
+                mail_create_nolog=True,
+                mail_auto_subscribe_no_notify=True,
+                mail_notify_force_send=False,
+                tracking_disable=True,
+            ).sudo().create(task_vals)
             item.sudo().write({"todo_task_id": task.id})
 
     # ---------------------------

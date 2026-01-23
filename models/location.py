@@ -21,6 +21,13 @@ class ShopifyRestockLocation(models.Model):
     )
     webhook_url = fields.Char(string="Webhook URL")
 
+    odoo_location_id = fields.Many2one(
+        comodel_name="stock.location",
+        string="Odoo Stock Location",
+        domain=[("usage", "=", "internal")],
+        help="Optional Odoo location to deduct inventory from when restock tasks are completed.",
+    )
+
     @api.onchange("location_id_global")
     def _onchange_global_fill_numeric(self):
         if self.location_id_global and not self.location_id_numeric:

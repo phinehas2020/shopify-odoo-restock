@@ -8,6 +8,7 @@
         <field name="name"/>
         <field name="location_id_global"/>
         <field name="location_id_numeric"/>
+        <field name="odoo_location_id"/>
         <field name="active"/>
       </list>
     </field>
@@ -24,6 +25,9 @@
             <field name="location_id_global"/>
             <field name="location_id_numeric"/>
             <field name="active"/>
+          </group>
+          <group string="Odoo Inventory">
+            <field name="odoo_location_id"/>
           </group>
           <group string="Webhook">
             <field name="webhook_enabled"/>

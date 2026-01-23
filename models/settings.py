@@ -50,6 +50,17 @@ class ResConfigSettings(models.TransientModel):
         string="Webhook URL",
         help="Target URL to POST each restock item as JSON (title, guid, amount).",
     )
+    restock_project_id = fields.Many2one(
+        comodel_name="project.project",
+        string="Restock Project",
+        help="Project to create Shopify restock to-do tasks in.",
+    )
+    restock_odoo_location_id = fields.Many2one(
+        comodel_name="stock.location",
+        string="Default Stock Location",
+        domain=[("usage", "=", "internal")],
+        help="Default Odoo stock location to deduct inventory from.",
+    )
 
     @api.model
     def get_values(self):
@@ -65,6 +76,8 @@ class ResConfigSettings(models.TransientModel):
             restock_email_to=ICP.get_param("odoo_shopify_restock.email_to", default=""),
             restock_webhook_enabled=ICP.get_param("odoo_shopify_restock.webhook_enabled", default="0") == "1",
             restock_webhook_url=ICP.get_param("odoo_shopify_restock.webhook_url", default=""),
+            restock_project_id=int(ICP.get_param("odoo_shopify_restock.project_id", default="0") or 0) or False,
+            restock_odoo_location_id=int(ICP.get_param("odoo_shopify_restock.odoo_location_id", default="0") or 0) or False,
         )
         return res
 
@@ -82,3 +95,5 @@ class ResConfigSettings(models.TransientModel):
         ICP.set_param("odoo_shopify_restock.email_to", email)
         ICP.set_param("odoo_shopify_restock.webhook_enabled", "1" if self.restock_webhook_enabled else "0")
         ICP.set_param("odoo_shopify_restock.webhook_url", self.restock_webhook_url or "")
+        ICP.set_param("odoo_shopify_restock.project_id", str(self.restock_project_id.id or 0))
+        ICP.set_param("odoo_shopify_restock.odoo_location_id", str(self.restock_odoo_location_id.id or 0))

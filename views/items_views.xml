@@ -11,9 +11,12 @@
         <field name="product_title"/>
         <field name="variant_title"/>
         <field name="sku"/>
+        <field name="location_id"/>
         <field name="current_qty"/>
         <field name="restock_level"/>
         <field name="restock_amount"/>
+        <field name="todo_task_id"/>
+        <field name="inventory_deducted"/>
         <field name="product_url"/>
       </list>
     </field>
@@ -31,13 +34,20 @@
             <field name="product_title"/>
             <field name="variant_title"/>
             <field name="sku"/>
+            <field name="location_id"/>
             <field name="product_handle"/>
             <field name="product_url"/>
+            <field name="todo_task_id"/>
           </group>
           <group string="Stock">
             <field name="current_qty"/>
             <field name="restock_level"/>
             <field name="restock_amount"/>
+            <field name="inventory_deducted"/>
+            <field name="inventory_move_id"/>
+            <field name="inventory_deducted_at"/>
+            <field name="inventory_deducted_by"/>
+            <field name="inventory_deduction_error"/>
           </group>
         </sheet>
       </form>

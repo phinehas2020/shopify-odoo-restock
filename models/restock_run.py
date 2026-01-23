@@ -17,6 +17,10 @@ class ShopifyRestockRun(models.Model):
     email_to = fields.Char()
     rss_items_json = fields.Text(help="Serialized JSON of rss_items")
     error_message = fields.Char()
+    location_id = fields.Many2one(
+        comodel_name="shopify.restock.location",
+        string="Shopify Location",
+    )
 
     item_ids = fields.One2many(
         comodel_name="shopify.restock.item",

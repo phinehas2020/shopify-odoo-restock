@@ -27,6 +27,7 @@ class ShopifyRestockService(models.AbstractModel):
         result: Dict[str, Any]
         email_to_override = (email_to_override or "").strip() or None
         actual_email_to = email_to_override or settings.get("email_to")
+        location = self.env.context.get("shopify_restock_location")
         try:
             result = self._generate_report(settings)
         except Exception as exc:  # pylint: disable=broad-except
@@ -48,8 +49,6 @@ class ShopifyRestockService(models.AbstractModel):
 
         # Post each item to the webhook if enabled (non-blocking)
         try:
-            # Try to pass location record if present in context
-            location = self.env.context.get("shopify_restock_location")
             self._post_items_to_webhook(settings, result.get("rss_items", []) or [], location)
         except Exception:
             pass
@@ -65,6 +64,7 @@ class ShopifyRestockService(models.AbstractModel):
             "email_to": actual_email_to,
             "rss_items_json": json.dumps(result.get("rss_items", []), ensure_ascii=False),
             "error_message": result.get("error"),
+            "location_id": location.id if location else False,
         })
         items_vals = []
         for item in result.get("rss_items", []) or []:
@@ -83,7 +83,8 @@ class ShopifyRestockService(models.AbstractModel):
                 "variant_id_global": item.get("variant_id"),
             })
         if items_vals:
-            self.env["shopify.restock.item"].sudo().create(items_vals)
+            items = self.env["shopify.restock.item"].sudo().create(items_vals)
+            self._create_tasks_for_items(settings, items, run, location)
         return result
 
     @api.model
@@ -152,6 +153,9 @@ class ShopifyRestockService(models.AbstractModel):
         email_to = ICP.get_param("odoo_shopify_restock.email_to") or ""
         webhook_enabled = (ICP.get_param("odoo_shopify_restock.webhook_enabled") or "0") == "1"
         webhook_url = ICP.get_param("odoo_shopify_restock.webhook_url") or ""
+        employee_id = ICP.get_param("odoo_shopify_restock.employee_id") or "0"
+        project_id = ICP.get_param("odoo_shopify_restock.project_id") or "0"
+        odoo_location_id = ICP.get_param("odoo_shopify_restock.odoo_location_id") or "0"
         
         # Override with location-specific settings if available
         location = self.env.context.get("shopify_restock_location")
@@ -170,6 +174,9 @@ class ShopifyRestockService(models.AbstractModel):
             "email_to": email_to.strip(),
             "webhook_enabled": webhook_enabled,
             "webhook_url": webhook_url.strip(),
+            "employee_id": employee_id.strip(),
+            "project_id": project_id.strip(),
+            "odoo_location_id": odoo_location_id.strip(),
         }
 
     # ---------------------------
@@ -574,6 +581,66 @@ class ShopifyRestockService(models.AbstractModel):
             except Exception:
                 # Ignore webhook failures so the run still succeeds
                 continue
+
+    def _get_task_user_id(self, settings: Dict[str, str]) -> Optional[int]:
+        employee_id = settings.get("employee_id")
+        if employee_id and str(employee_id).isdigit():
+            employee = self.env["hr.employee"].sudo().browse(int(employee_id))
+            if employee and employee.user_id:
+                return employee.user_id.id
+        return None
+
+    def _get_restock_project(self, settings: Dict[str, str]) -> models.Model:
+        project_id = settings.get("project_id")
+        if project_id and str(project_id).isdigit():
+            project = self.env["project.project"].sudo().browse(int(project_id))
+            if project and project.exists():
+                return project
+        project = self.env["project.project"].sudo().search([("name", "=", "Shopify Restock")], limit=1)
+        if not project:
+            project = self.env["project.project"].sudo().create({
+                "name": "Shopify Restock",
+                "company_id": self.env.company.id,
+            })
+        return project
+
+    def _create_tasks_for_items(
+        self,
+        settings: Dict[str, str],
+        items: models.Model,
+        run: models.Model,
+        location: Optional[models.Model] = None,
+    ) -> None:
+        if not items:
+            return
+        project = self._get_restock_project(settings)
+        user_id = self._get_task_user_id(settings)
+        for item in items:
+            display_title = item.product_title or "Restock Item"
+            if item.variant_title and item.variant_title != "Default Title":
+                display_title += f" - {item.variant_title}"
+            description_lines = [
+                f"Product: {item.product_title or ''}",
+                f"Variant: {item.variant_title or ''}",
+                f"SKU: {item.sku or ''}",
+                f"Current Qty: {item.current_qty or 0}",
+                f"Restock Level: {item.restock_level or ''}",
+                f"Recommended Order: {item.restock_amount or 0}",
+            ]
+            if item.product_url:
+                description_lines.append(f"Shopify URL: {item.product_url}")
+            if location:
+                description_lines.append(f"Shopify Location: {getattr(location, 'name', '')}")
+            task_vals = {
+                "name": f"Restock: {display_title}",
+                "description": "\n".join(filter(None, description_lines)),
+                "project_id": project.id if project else False,
+                "restock_item_id": item.id,
+            }
+            if user_id:
+                task_vals["user_id"] = user_id
+            task = self.env["project.task"].sudo().create(task_vals)
+            item.sudo().write({"todo_task_id": task.id})
 
     # ---------------------------
     # Email via Odoo's mail server

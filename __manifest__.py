@@ -8,7 +8,7 @@
     "license": "LGPL-3",
     "website": "https://example.com",
     "images": ["static/description/icon.svg"],
-    "depends": ["base", "mail", "web", "hr", "stock"],
+    "depends": ["base", "mail", "web", "hr", "stock", "project"],
     "data": [
         "security/ir.model.access.csv",
         "views/settings_view.xml",

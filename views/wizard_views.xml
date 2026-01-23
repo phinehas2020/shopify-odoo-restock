@@ -69,6 +69,7 @@
     <field name="arch" type="xml">
       <list>
         <field name="create_date"/>
+        <field name="location_id"/>
         <field name="rss_item_count"/>
         <field name="has_restock_alerts"/>
         <field name="email_sent"/>
@@ -88,6 +89,7 @@
         <sheet>
           <group>
             <field name="report_timestamp"/>
+            <field name="location_id"/>
             <field name="total_products_found"/>
             <field name="total_products_checked"/>
             <field name="rss_item_count"/>

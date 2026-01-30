@@ -573,32 +573,21 @@ class ShopifyRestockService(models.AbstractModel):
         return project
 
     def _ensure_project_has_done_stage(self, project: models.Model) -> None:
-        """Ensure the project has a 'Done' stage marked as folded/closed."""
+        """Ensure the project has a 'Done' stage (folded in kanban).
+
+        Note: In Odoo 18, task completion is determined by task.state ('1_done'),
+        not by the stage. However, having a folded 'Done' stage helps organize
+        the kanban view.
+        """
         if not project:
             return
         stage_model = self.env["project.task.type"].sudo()
 
-        # Check which field exists for "closed" status (varies by Odoo version)
-        has_is_closed = "is_closed" in stage_model._fields
-        has_fold = "fold" in stage_model._fields
-
-        # Check if project already has a closed/folded stage
-        if has_is_closed:
-            done_stage = stage_model.search([
-                ("project_ids", "in", project.id),
-                ("is_closed", "=", True),
-            ], limit=1)
-        elif has_fold:
-            done_stage = stage_model.search([
-                ("project_ids", "in", project.id),
-                ("fold", "=", True),
-            ], limit=1)
-        else:
-            # No closed field available, just check if "Done" stage exists by name
-            done_stage = stage_model.search([
-                ("project_ids", "in", project.id),
-                ("name", "ilike", "done"),
-            ], limit=1)
+        # Check if project already has a "Done" stage by name
+        done_stage = stage_model.search([
+            ("project_ids", "in", project.id),
+            ("name", "ilike", "done"),
+        ], limit=1)
 
         if done_stage:
             return
@@ -609,9 +598,8 @@ class ShopifyRestockService(models.AbstractModel):
             "project_ids": [(4, project.id)],
             "sequence": 100,
         }
-        if has_is_closed:
-            stage_vals["is_closed"] = True
-        if has_fold:
+        # Set fold=True if the field exists (hides in kanban)
+        if "fold" in stage_model._fields:
             stage_vals["fold"] = True
 
         stage_model.create(stage_vals)

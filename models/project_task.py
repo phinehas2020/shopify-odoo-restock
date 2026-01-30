@@ -19,25 +19,37 @@ class ProjectTask(models.Model):
     def _restock_task_is_done(self) -> bool:
         """Check if this task is in a 'done' state.
 
-        Handles both:
-        - Odoo 18 Todo app: uses 'state' field with values like '1_done', 'done'
-        - Projects app: uses stage_id with is_closed or fold flags
+        Odoo 18 uses the 'state' field on project.task:
+        - '01_in_progress' - In Progress (open)
+        - '02_changes_requested' - Changes Requested (open)
+        - '03_approved' - Approved (open)
+        - '04_waiting' - Waiting (open)
+        - '1_done' - Done (CLOSED)
+        - '1_canceled' - Canceled (CLOSED)
+
+        Falls back to stage.fold for older versions.
         """
         self.ensure_one()
 
-        # Odoo 18 Todo app uses 'state' field
+        # Odoo 18+ uses 'state' field - closed states start with '1_'
         if "state" in self._fields and self.state:
-            done_states = ['1_done', 'done', '1_canceled', 'canceled', '03_approved']
-            if self.state in done_states:
+            # Closed states: '1_done', '1_canceled'
+            if self.state in ('1_done', '1_canceled'):
                 return True
+            # If state exists and is an open state, task is NOT done
+            if self.state in ('01_in_progress', '02_changes_requested', '03_approved', '04_waiting'):
+                return False
 
-        # Projects app uses stage-based completion
+        # Fallback for older Odoo versions: check stage
         stage = self.stage_id
         if not stage:
             return False
+        # In older versions, fold or is_closed indicates completion
         if "is_closed" in stage._fields:
             return bool(stage.is_closed)
-        return bool(stage.fold)
+        if "fold" in stage._fields:
+            return bool(stage.fold)
+        return False
 
     def write(self, vals):
         restock_tasks = self.filtered("restock_item_id")

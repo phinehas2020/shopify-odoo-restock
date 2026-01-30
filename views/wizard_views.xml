@@ -70,7 +70,7 @@
       <list>
         <field name="create_date"/>
         <field name="location_id"/>
-        <field name="rss_item_count"/>
+        <field name="rss_item_count" string="Alerts"/>
         <field name="has_restock_alerts"/>
         <field name="email_sent"/>
         <field name="email_to"/>
@@ -92,14 +92,14 @@
             <field name="location_id"/>
             <field name="total_products_found"/>
             <field name="total_products_checked"/>
-            <field name="rss_item_count"/>
+            <field name="rss_item_count" string="Alert Count"/>
             <field name="has_restock_alerts"/>
             <field name="email_sent"/>
             <field name="email_to"/>
             <field name="error_message"/>
           </group>
-          <group string="Raw JSON">
-            <field name="rss_items_json" widget="text"/>
+          <group string="Alerts Data">
+            <field name="rss_items_json" string="Alerts JSON" widget="text"/>
           </group>
         </sheet>
       </form>

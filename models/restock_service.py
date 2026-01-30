@@ -573,24 +573,48 @@ class ShopifyRestockService(models.AbstractModel):
         return project
 
     def _ensure_project_has_done_stage(self, project: models.Model) -> None:
-        """Ensure the project has a 'Done' stage with is_closed=True."""
+        """Ensure the project has a 'Done' stage marked as folded/closed."""
         if not project:
             return
         stage_model = self.env["project.task.type"].sudo()
-        # Check if project already has a closed stage
-        done_stage = stage_model.search([
-            ("project_ids", "in", project.id),
-            ("is_closed", "=", True),
-        ], limit=1)
+
+        # Check which field exists for "closed" status (varies by Odoo version)
+        has_is_closed = "is_closed" in stage_model._fields
+        has_fold = "fold" in stage_model._fields
+
+        # Check if project already has a closed/folded stage
+        if has_is_closed:
+            done_stage = stage_model.search([
+                ("project_ids", "in", project.id),
+                ("is_closed", "=", True),
+            ], limit=1)
+        elif has_fold:
+            done_stage = stage_model.search([
+                ("project_ids", "in", project.id),
+                ("fold", "=", True),
+            ], limit=1)
+        else:
+            # No closed field available, just check if "Done" stage exists by name
+            done_stage = stage_model.search([
+                ("project_ids", "in", project.id),
+                ("name", "ilike", "done"),
+            ], limit=1)
+
         if done_stage:
             return
+
         # Create a Done stage for this project
-        stage_model.create({
+        stage_vals = {
             "name": "Done",
             "project_ids": [(4, project.id)],
-            "is_closed": True,
             "sequence": 100,
-        })
+        }
+        if has_is_closed:
+            stage_vals["is_closed"] = True
+        if has_fold:
+            stage_vals["fold"] = True
+
+        stage_model.create(stage_vals)
         _logger.info("Created 'Done' stage for Shopify Restock project %s", project.id)
 
     def _create_tasks_for_items(

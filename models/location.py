@@ -15,9 +15,9 @@ class ShopifyRestockLocation(models.Model):
 
     odoo_location_id = fields.Many2one(
         comodel_name="stock.location",
-        string="Odoo Stock Location",
+        string="Odoo Destination Location",
         domain=[("usage", "=", "internal")],
-        help="Optional Odoo location to deduct inventory from when restock tasks are completed.",
+        help="The Odoo retail/store location to transfer stock TO when restock tasks for this Shopify location are completed.",
     )
 
     @api.onchange("location_id_global")

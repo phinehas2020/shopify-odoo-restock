@@ -44,18 +44,36 @@ class ShopifyRestockItem(models.Model):
         string="To-do Task",
         ondelete="set null",
     )
+    task_state = fields.Char(
+        string="Task Status",
+        compute="_compute_task_state",
+        store=False,
+    )
     inventory_move_id = fields.Many2one(
         comodel_name="stock.move",
         string="Inventory Move",
         ondelete="set null",
     )
-    inventory_deducted = fields.Boolean(default=False, copy=False)
-    inventory_deducted_at = fields.Datetime(copy=False)
-    inventory_deducted_by = fields.Many2one(
+    inventory_transferred = fields.Boolean(string="Inventory Transferred", default=False, copy=False)
+    inventory_transferred_at = fields.Datetime(copy=False)
+    inventory_transferred_by = fields.Many2one(
         comodel_name="res.users",
+        string="Transferred By",
         copy=False,
     )
-    inventory_deduction_error = fields.Char(copy=False)
+    inventory_transfer_error = fields.Char(string="Transfer Error", copy=False)
+
+    @api.depends("todo_task_id", "todo_task_id.state", "todo_task_id.stage_id")
+    def _compute_task_state(self):
+        for item in self:
+            if not item.todo_task_id:
+                item.task_state = "No Task"
+            elif "state" in item.todo_task_id._fields and item.todo_task_id.state:
+                item.task_state = item.todo_task_id.state
+            elif item.todo_task_id.stage_id:
+                item.task_state = item.todo_task_id.stage_id.name
+            else:
+                item.task_state = "Unknown"
 
     def _get_odoo_product(self):
         self.ensure_one()
@@ -64,36 +82,51 @@ class ShopifyRestockItem(models.Model):
         return self.env["product.product"].sudo().search([("default_code", "=", self.sku)], limit=1)
 
     def _get_source_location(self):
+        """Get the source location (warehouse where stock comes FROM)."""
         self.ensure_one()
-        location = None
-        if self.location_id and self.location_id.odoo_location_id:
-            location = self.location_id.odoo_location_id
-        if not location:
-            param = self.env["ir.config_parameter"].sudo().get_param("odoo_shopify_restock.odoo_location_id")
-            if param and str(param).isdigit():
-                location = self.env["stock.location"].sudo().browse(int(param))
-        if not location:
-            try:
-                location = self.env.ref("stock.stock_location_stock")
-            except Exception:
-                location = self.env["stock.location"].sudo().search([("usage", "=", "internal")], limit=1)
-        return location if location and location.exists() else None
+        ICP = self.env["ir.config_parameter"].sudo()
+
+        # First check for configured source/warehouse location
+        source_param = ICP.get_param("odoo_shopify_restock.source_location_id")
+        if source_param and str(source_param).isdigit():
+            location = self.env["stock.location"].sudo().browse(int(source_param))
+            if location.exists():
+                return location
+
+        # Fall back to main stock location
+        try:
+            return self.env.ref("stock.stock_location_stock")
+        except Exception:
+            return self.env["stock.location"].sudo().search([("usage", "=", "internal")], limit=1)
 
     def _get_destination_location(self):
+        """Get the destination location (retail location where stock goes TO).
+
+        This is the location being restocked - typically a retail store location.
+        """
         self.ensure_one()
-        location = None
-        try:
-            location = self.env.ref("stock.stock_location_inventory")
-        except Exception:
-            location = self.env["stock.location"].sudo().search([("usage", "=", "inventory")], limit=1)
-        if not location:
-            location = self.env["stock.location"].sudo().search([("usage", "=", "customer")], limit=1)
-        return location if location and location.exists() else None
+
+        # The Shopify location's linked Odoo location IS the destination
+        # (this is the retail/store location that needs restocking)
+        if self.location_id and self.location_id.odoo_location_id:
+            return self.location_id.odoo_location_id
+
+        # Fall back to global destination setting
+        param = self.env["ir.config_parameter"].sudo().get_param(
+            "odoo_shopify_restock.odoo_location_id"
+        )
+        if param and str(param).isdigit():
+            location = self.env["stock.location"].sudo().browse(int(param))
+            if location.exists():
+                return location
+
+        return None
 
     def _create_inventory_move(self, product, quantity, source_location, dest_location):
+        """Create a stock move to transfer inventory from source to destination."""
         self.ensure_one()
         move_vals = {
-            "name": f"Shopify Restock Deduction: {self.sku or product.display_name}",
+            "name": f"Restock Transfer: {self.product_title} ({self.sku or product.display_name})",
             "product_id": product.id,
             "product_uom_qty": quantity,
             "product_uom": product.uom_id.id,
@@ -101,7 +134,7 @@ class ShopifyRestockItem(models.Model):
             "location_dest_id": dest_location.id,
             "company_id": source_location.company_id.id or self.env.company.id,
             "origin": self.run_id.name or "",
-            "reference": f"Shopify Restock Item {self.id}",
+            "reference": f"Restock: {self.product_title}",
         }
         move = self.env["stock.move"].sudo().create(move_vals)
         move._action_confirm()
@@ -123,47 +156,58 @@ class ShopifyRestockItem(models.Model):
         move._action_done()
         return move
 
-    def action_deduct_inventory(self):
+    def action_transfer_inventory(self):
+        """Transfer inventory from warehouse to retail location when restock task is completed."""
         for item in self:
-            if item.inventory_deducted:
+            if item.inventory_transferred:
+                _logger.debug("Item %s already transferred, skipping", item.id)
                 continue
             qty = int(item.restock_amount or 0)
             if qty <= 0:
                 item.sudo().write({
-                    "inventory_deduction_error": "No restock amount to deduct.",
+                    "inventory_transfer_error": "No restock amount to transfer.",
                 })
+                _logger.warning("Restock item %s has no quantity to transfer", item.id)
                 continue
             product = item._get_odoo_product()
             if not product:
                 item.sudo().write({
-                    "inventory_deduction_error": f"No Odoo product found for SKU '{item.sku or ''}'.",
+                    "inventory_transfer_error": f"No Odoo product found for SKU '{item.sku or ''}'.",
                 })
+                _logger.warning("No Odoo product found for SKU '%s' (item %s)", item.sku, item.id)
                 continue
             source_location = item._get_source_location()
             if not source_location:
                 item.sudo().write({
-                    "inventory_deduction_error": "No source stock location available for inventory deduction.",
+                    "inventory_transfer_error": "No source location (warehouse) configured. Set Source Location in Shopify Restock settings.",
                 })
+                _logger.error("No source location configured for restock item %s", item.id)
                 continue
             dest_location = item._get_destination_location()
             if not dest_location:
                 item.sudo().write({
-                    "inventory_deduction_error": "No destination stock location available for inventory deduction.",
+                    "inventory_transfer_error": "No destination location (retail) configured. Link Odoo location to Shopify location or set in settings.",
                 })
+                _logger.error("No destination location configured for restock item %s", item.id)
                 continue
             try:
+                _logger.info(
+                    "Transferring %s units of %s from %s to %s",
+                    qty, product.display_name, source_location.complete_name, dest_location.complete_name
+                )
                 move = item._create_inventory_move(product, qty, source_location, dest_location)
-            except Exception:
-                _logger.exception("Inventory deduction failed for restock item %s", item.id)
+            except Exception as e:
+                _logger.exception("Inventory transfer failed for restock item %s", item.id)
                 item.sudo().write({
-                    "inventory_deduction_error": "Inventory deduction failed. See logs for details.",
+                    "inventory_transfer_error": f"Transfer failed: {str(e)[:200]}",
                 })
                 continue
-            deducted_by_uid = item.env.context.get("deducted_by_uid") or item.env.user.id
+            transferred_by_uid = item.env.context.get("transferred_by_uid") or item.env.user.id
             item.sudo().write({
                 "inventory_move_id": move.id,
-                "inventory_deducted": True,
-                "inventory_deducted_at": fields.Datetime.now(),
-                "inventory_deducted_by": deducted_by_uid,
-                "inventory_deduction_error": False,
+                "inventory_transferred": True,
+                "inventory_transferred_at": fields.Datetime.now(),
+                "inventory_transferred_by": transferred_by_uid,
+                "inventory_transfer_error": False,
             })
+            _logger.info("Successfully transferred inventory for restock item %s (move %s)", item.id, move.id)

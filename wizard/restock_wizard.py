@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from odoo import api, fields, models
+from odoo.exceptions import ValidationError
 
 
 class ShopifyRestockWizard(models.TransientModel):
@@ -8,14 +9,24 @@ class ShopifyRestockWizard(models.TransientModel):
 
     employee_id = fields.Many2one(
         comodel_name="hr.employee",
-        string="Alert Recipient (Employee)",
-        help="Email will be sent to this employee's work email for this run only.",
+        string="Assignee (Employee)",
+        required=True,
+        help="Tasks will be assigned to this employee. Email will be sent to their work email.",
     )
     location_id = fields.Many2one(
         comodel_name="shopify.restock.location",
         string="Shopify Location",
         help="Choose which Shopify location to use for inventory checks.",
     )
+
+    @api.constrains("employee_id")
+    def _check_employee_has_user(self):
+        for wizard in self:
+            if wizard.employee_id and not wizard.employee_id.user_id:
+                raise ValidationError(
+                    f"Employee '{wizard.employee_id.name}' does not have a linked user account. "
+                    "Please link a user to this employee in HR settings before running restock."
+                )
 
     def action_run(self):
         self.ensure_one()

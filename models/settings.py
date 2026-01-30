@@ -32,11 +32,17 @@ class ResConfigSettings(models.TransientModel):
         string="Restock Project",
         help="Project to create Shopify restock to-do tasks in.",
     )
+    restock_source_location_id = fields.Many2one(
+        comodel_name="stock.location",
+        string="Source Location (Warehouse)",
+        domain=[("usage", "=", "internal")],
+        help="The warehouse location to transfer stock FROM when restock tasks are completed.",
+    )
     restock_odoo_location_id = fields.Many2one(
         comodel_name="stock.location",
-        string="Default Stock Location",
+        string="Destination Location (Retail)",
         domain=[("usage", "=", "internal")],
-        help="Default Odoo stock location to deduct inventory from.",
+        help="Default retail/store location to transfer stock TO. Can be overridden per Shopify location.",
     )
 
     @api.model
@@ -50,6 +56,7 @@ class ResConfigSettings(models.TransientModel):
             shopify_location_id_global=ICP.get_param("odoo_shopify_restock.location_id_global", default=""),
             shopify_location_id_numeric=ICP.get_param("odoo_shopify_restock.location_id_numeric", default=""),
             restock_project_id=int(ICP.get_param("odoo_shopify_restock.project_id", default="0") or 0) or False,
+            restock_source_location_id=int(ICP.get_param("odoo_shopify_restock.source_location_id", default="0") or 0) or False,
             restock_odoo_location_id=int(ICP.get_param("odoo_shopify_restock.odoo_location_id", default="0") or 0) or False,
         )
         return res
@@ -63,4 +70,5 @@ class ResConfigSettings(models.TransientModel):
         ICP.set_param("odoo_shopify_restock.location_id_global", self.shopify_location_id_global or "")
         ICP.set_param("odoo_shopify_restock.location_id_numeric", self.shopify_location_id_numeric or "")
         ICP.set_param("odoo_shopify_restock.project_id", str(self.restock_project_id.id or 0))
+        ICP.set_param("odoo_shopify_restock.source_location_id", str(self.restock_source_location_id.id or 0))
         ICP.set_param("odoo_shopify_restock.odoo_location_id", str(self.restock_odoo_location_id.id or 0))

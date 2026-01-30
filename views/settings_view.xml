@@ -16,11 +16,12 @@
             <field name="shopify_location_id_global"/>
             <field name="shopify_location_id_numeric"/>
           </group>
-          <group string="To-do">
+          <group string="To-do Tasks">
             <field name="restock_project_id"/>
           </group>
-          <group string="Odoo Inventory">
-            <field name="restock_odoo_location_id"/>
+          <group string="Inventory Transfer Locations">
+            <field name="restock_source_location_id" placeholder="e.g. WH/Stock (warehouse)"/>
+            <field name="restock_odoo_location_id" placeholder="e.g. Retail/Stock (store)"/>
           </group>
         </group>
         <footer>

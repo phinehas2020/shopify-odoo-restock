@@ -6,7 +6,7 @@
     <field name="arch" type="xml">
       <form string="Shopify Restock">
         <group>
-          <field name="employee_id" options='{"no_create": true}'/>
+          <field name="employee_id" required="1" options='{"no_create": true}'/>
           <field name="location_id" options='{"no_create": false}'/>
         </group>
         <footer>

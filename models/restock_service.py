@@ -561,6 +561,7 @@ class ShopifyRestockService(models.AbstractModel):
         if project_id and str(project_id).isdigit():
             project = self.env["project.project"].sudo().browse(int(project_id))
             if project and project.exists():
+                self._ensure_project_has_done_stage(project)
                 return project
         project = self.env["project.project"].sudo().search([("name", "=", "Shopify Restock")], limit=1)
         if not project:
@@ -568,7 +569,29 @@ class ShopifyRestockService(models.AbstractModel):
                 "name": "Shopify Restock",
                 "company_id": self.env.company.id,
             })
+        self._ensure_project_has_done_stage(project)
         return project
+
+    def _ensure_project_has_done_stage(self, project: models.Model) -> None:
+        """Ensure the project has a 'Done' stage with is_closed=True."""
+        if not project:
+            return
+        stage_model = self.env["project.task.type"].sudo()
+        # Check if project already has a closed stage
+        done_stage = stage_model.search([
+            ("project_ids", "in", project.id),
+            ("is_closed", "=", True),
+        ], limit=1)
+        if done_stage:
+            return
+        # Create a Done stage for this project
+        stage_model.create({
+            "name": "Done",
+            "project_ids": [(4, project.id)],
+            "is_closed": True,
+            "sequence": 100,
+        })
+        _logger.info("Created 'Done' stage for Shopify Restock project %s", project.id)
 
     def _create_tasks_for_items(
         self,

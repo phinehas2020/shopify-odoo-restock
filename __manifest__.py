@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 {
     "name": "Shopify Restock Alerts",
-    "summary": "Fetch Shopify inventory and email restock alerts using Odoo mail server",
-    "version": "18.0.1.0.5",
+    "summary": "Fetch Shopify inventory, create restock tasks, and transfer inventory when completed",
+    "version": "18.0.1.1.0",
     "category": "Inventory/Integration",
     "author": "Custom",
     "license": "LGPL-3",

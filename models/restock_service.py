@@ -613,47 +613,59 @@ class ShopifyRestockService(models.AbstractModel):
         location: Optional[models.Model] = None,
     ) -> None:
         if not items:
+            _logger.warning("No items to create tasks for")
             return
+        _logger.info("Creating tasks for %d restock items", len(items))
         project = self._get_restock_project(settings)
         user_id = self._get_task_user_id(settings)
+        _logger.info("Using project %s (ID: %s), user_id: %s",
+                     project.name if project else None,
+                     project.id if project else None,
+                     user_id)
         task_model = self.env["project.task"]
+        tasks_created = 0
         for item in items:
-            display_title = item.product_title or "Restock Item"
-            if item.variant_title and item.variant_title != "Default Title":
-                display_title += f" - {item.variant_title}"
-            description_lines = [
-                f"Product: {item.product_title or ''}",
-                f"Variant: {item.variant_title or ''}",
-                f"SKU: {item.sku or ''}",
-                f"Current Qty: {item.current_qty or 0}",
-                f"Restock Level: {item.restock_level or ''}",
-                f"Recommended Order: {item.restock_amount or 0}",
-            ]
-            if item.product_url:
-                description_lines.append(f"Shopify URL: {item.product_url}")
-            if location:
-                description_lines.append(f"Shopify Location: {getattr(location, 'name', '')}")
-            task_vals = {
-                "name": f"Restock: {display_title}",
-                "description": "\n".join(filter(None, description_lines)),
-                "project_id": project.id if project else False,
-                "restock_item_id": item.id,
-            }
-            if user_id:
-                if "user_id" in task_model._fields:
-                    task_vals["user_id"] = user_id
-                elif "user_ids" in task_model._fields:
-                    task_vals["user_ids"] = [(6, 0, [user_id])]
-                elif "assigned_ids" in task_model._fields:
-                    task_vals["assigned_ids"] = [(6, 0, [user_id])]
-            task = self.env["project.task"].with_context(
-                mail_create_nosubscribe=True,
-                mail_create_nolog=True,
-                mail_auto_subscribe_no_notify=True,
-                mail_notify_force_send=False,
-                tracking_disable=True,
-            ).sudo().create(task_vals)
-            item.sudo().write({"todo_task_id": task.id})
+            try:
+                display_title = item.product_title or "Restock Item"
+                if item.variant_title and item.variant_title != "Default Title":
+                    display_title += f" - {item.variant_title}"
+                description_lines = [
+                    f"Product: {item.product_title or ''}",
+                    f"Variant: {item.variant_title or ''}",
+                    f"SKU: {item.sku or ''}",
+                    f"Current Qty: {item.current_qty or 0}",
+                    f"Restock Level: {item.restock_level or ''}",
+                    f"Recommended Order: {item.restock_amount or 0}",
+                ]
+                if item.product_url:
+                    description_lines.append(f"Shopify URL: {item.product_url}")
+                if location:
+                    description_lines.append(f"Shopify Location: {getattr(location, 'name', '')}")
+                task_vals = {
+                    "name": f"Restock: {display_title}",
+                    "description": "\n".join(filter(None, description_lines)),
+                    "project_id": project.id if project else False,
+                    "restock_item_id": item.id,
+                }
+                if user_id:
+                    if "user_id" in task_model._fields:
+                        task_vals["user_id"] = user_id
+                    elif "user_ids" in task_model._fields:
+                        task_vals["user_ids"] = [(6, 0, [user_id])]
+                    elif "assigned_ids" in task_model._fields:
+                        task_vals["assigned_ids"] = [(6, 0, [user_id])]
+                task = self.env["project.task"].with_context(
+                    mail_create_nosubscribe=True,
+                    mail_create_nolog=True,
+                    mail_auto_subscribe_no_notify=True,
+                    mail_notify_force_send=False,
+                    tracking_disable=True,
+                ).sudo().create(task_vals)
+                item.sudo().write({"todo_task_id": task.id})
+                tasks_created += 1
+            except Exception as e:
+                _logger.exception("Failed to create task for item %s: %s", item.id, e)
+        _logger.info("Created %d tasks for restock run", tasks_created)
 
     # ---------------------------
     # Email via Odoo's mail server

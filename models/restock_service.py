@@ -660,6 +660,7 @@ class ShopifyRestockService(models.AbstractModel):
     def _ensure_project_actions_have_fallback_views(self) -> None:
         """Prevent timeline-only actions from erroring if timeline view isn't available."""
         action_model = self.env["ir.actions.act_window"].sudo()
+        view_model = self.env["ir.ui.view"].sudo()
         actions = action_model.search([
             ("view_mode", "ilike", "timeline"),
             ("res_model", "ilike", "project."),
@@ -668,9 +669,17 @@ class ShopifyRestockService(models.AbstractModel):
             modes = [m.strip() for m in (action.view_mode or "").split(",") if m.strip()]
             if not modes:
                 continue
-            if modes[0] != "timeline":
-                continue
-            modes = [m for m in modes if m != "timeline"] + ["timeline"]
+            has_timeline_view = bool(view_model.search([
+                ("model", "=", action.res_model),
+                ("type", "=", "timeline"),
+            ], limit=1))
+            if not has_timeline_view:
+                modes = [m for m in modes if m != "timeline"]
+            else:
+                if modes[0] == "timeline" and len(modes) > 1:
+                    modes = [m for m in modes if m != "timeline"] + ["timeline"]
+            if not modes:
+                modes = ["kanban", "tree", "form"]
             # Deduplicate while preserving order
             seen = set()
             normalized = []

@@ -568,6 +568,7 @@ class ShopifyRestockService(models.AbstractModel):
             project = self.env["project.project"].sudo().browse(int(project_id))
             if project and project.exists():
                 self._ensure_project_has_done_stage(project)
+                self._ensure_runner_project_access(project)
                 return project
         project = self.env["project.project"].sudo().search([("name", "=", "Shopify Restock")], limit=1)
         if not project:
@@ -576,6 +577,7 @@ class ShopifyRestockService(models.AbstractModel):
                 "company_id": self.env.company.id,
             })
         self._ensure_project_has_done_stage(project)
+        self._ensure_runner_project_access(project)
         return project
 
     def _ensure_project_has_done_stage(self, project: models.Model) -> None:
@@ -610,6 +612,28 @@ class ShopifyRestockService(models.AbstractModel):
 
         stage_model.create(stage_vals)
         _logger.info("Created 'Done' stage for Shopify Restock project %s", project.id)
+
+    def _ensure_runner_project_access(self, project: models.Model) -> None:
+        """Ensure the user running the report can see the project (follower/member)."""
+        if not project:
+            return
+        run_by_uid = self.env.context.get("restock_run_by_uid")
+        if not run_by_uid or not str(run_by_uid).isdigit():
+            return
+        run_by_user = self.env["res.users"].sudo().browse(int(run_by_uid))
+        if not run_by_user or not run_by_user.exists():
+            return
+        # Subscribe runner as follower (covers 'followers-only' visibility)
+        if run_by_user.partner_id:
+            project.with_context(
+                mail_notify_force_send=False,
+                mail_auto_subscribe_no_notify=True,
+            ).sudo().message_subscribe(partner_ids=[run_by_user.partner_id.id])
+        # Also add as project member if the field exists
+        if "user_ids" in project._fields:
+            project.sudo().write({"user_ids": [(4, run_by_user.id)]})
+        elif "member_ids" in project._fields:
+            project.sudo().write({"member_ids": [(4, run_by_user.id)]})
 
     def _create_tasks_for_items(
         self,

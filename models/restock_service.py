@@ -20,7 +20,13 @@ class ShopifyRestockService(models.AbstractModel):
     # ---------------------------
     @api.model
     def run_restock_check(self, send_email: bool = True, email_to_override: str | None = None) -> Dict[str, Any]:
-        return self.sudo()._run_restock_check_internal(send_email=send_email, email_to_override=email_to_override)
+        service = self
+        if not service.env.context.get("restock_run_by_uid"):
+            service = service.with_context(restock_run_by_uid=service.env.user.id)
+        return service.sudo()._run_restock_check_internal(
+            send_email=send_email,
+            email_to_override=email_to_override,
+        )
 
     def _run_restock_check_internal(self, send_email: bool = True, email_to_override: str | None = None) -> Dict[str, Any]:
         settings = self._load_settings()
@@ -618,6 +624,12 @@ class ShopifyRestockService(models.AbstractModel):
         _logger.info("Creating tasks for %d restock items", len(items))
         project = self._get_restock_project(settings)
         user_id = self._get_task_user_id(settings)
+        run_by_uid = self.env.context.get("restock_run_by_uid")
+        run_by_partner_id = None
+        if run_by_uid and str(run_by_uid).isdigit():
+            run_by_user = self.env["res.users"].sudo().browse(int(run_by_uid))
+            if run_by_user and run_by_user.partner_id:
+                run_by_partner_id = run_by_user.partner_id.id
         _logger.info("Using project %s (ID: %s), user_id: %s",
                      project.name if project else None,
                      project.id if project else None,
@@ -661,6 +673,11 @@ class ShopifyRestockService(models.AbstractModel):
                     mail_notify_force_send=False,
                     tracking_disable=True,
                 ).sudo().create(task_vals)
+                if run_by_partner_id:
+                    task.with_context(
+                        mail_notify_force_send=False,
+                        mail_auto_subscribe_no_notify=True,
+                    ).sudo().message_subscribe(partner_ids=[run_by_partner_id])
                 item.sudo().write({"todo_task_id": task.id})
                 tasks_created += 1
             except Exception as e:

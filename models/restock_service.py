@@ -623,6 +623,9 @@ class ShopifyRestockService(models.AbstractModel):
         run_by_user = self.env["res.users"].sudo().browse(int(run_by_uid))
         if not run_by_user or not run_by_user.exists():
             return
+        # Unarchive if needed
+        if "active" in project._fields and not project.active:
+            project.sudo().write({"active": True})
         # Align project company with the runner's active company when possible
         if run_by_user.company_id:
             if "company_ids" in project._fields:

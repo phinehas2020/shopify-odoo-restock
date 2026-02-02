@@ -617,6 +617,7 @@ class ShopifyRestockService(models.AbstractModel):
         """Ensure the user running the report can see the project (follower/member)."""
         if not project:
             return
+        self._ensure_project_actions_have_fallback_views()
         run_by_uid = self.env.context.get("restock_run_by_uid")
         if not run_by_uid or not str(run_by_uid).isdigit():
             return
@@ -655,6 +656,30 @@ class ShopifyRestockService(models.AbstractModel):
             project.sudo().write({"user_ids": [(4, run_by_user.id)]})
         elif "member_ids" in project._fields:
             project.sudo().write({"member_ids": [(4, run_by_user.id)]})
+
+    def _ensure_project_actions_have_fallback_views(self) -> None:
+        """Prevent timeline-only actions from erroring if timeline view isn't available."""
+        action_model = self.env["ir.actions.act_window"].sudo()
+        actions = action_model.search([
+            ("view_mode", "ilike", "timeline"),
+            ("res_model", "ilike", "project."),
+        ])
+        for action in actions:
+            modes = [m.strip() for m in (action.view_mode or "").split(",") if m.strip()]
+            if not modes:
+                continue
+            if modes[0] != "timeline":
+                continue
+            modes = [m for m in modes if m != "timeline"] + ["timeline"]
+            # Deduplicate while preserving order
+            seen = set()
+            normalized = []
+            for mode in modes:
+                if mode in seen:
+                    continue
+                seen.add(mode)
+                normalized.append(mode)
+            action.write({"view_mode": ",".join(normalized)})
 
     def _create_tasks_for_items(
         self,

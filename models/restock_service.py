@@ -623,6 +623,24 @@ class ShopifyRestockService(models.AbstractModel):
         run_by_user = self.env["res.users"].sudo().browse(int(run_by_uid))
         if not run_by_user or not run_by_user.exists():
             return
+        # Align project company with the runner's active company when possible
+        if run_by_user.company_id:
+            if "company_ids" in project._fields:
+                project.sudo().write({"company_ids": [(4, run_by_user.company_id.id)]})
+            if "company_id" in project._fields:
+                if not project.company_id or project.company_id.id != run_by_user.company_id.id:
+                    project.sudo().write({"company_id": run_by_user.company_id.id})
+        # Prefer visibility to all internal users when supported
+        if "privacy_visibility" in project._fields:
+            selection = project._fields["privacy_visibility"].selection or []
+            allowed = {value for value, _label in selection}
+            target = None
+            for candidate in ("employees", "internal", "company"):
+                if candidate in allowed:
+                    target = candidate
+                    break
+            if target and project.privacy_visibility != target:
+                project.sudo().write({"privacy_visibility": target})
         # Subscribe runner as follower (covers 'followers-only' visibility)
         if run_by_user.partner_id:
             project.with_context(

@@ -681,8 +681,25 @@ class ShopifyRestockService(models.AbstractModel):
                      user_id)
         task_model = self.env["project.task"]
         tasks_created = 0
+        tasks_merged = 0
         for item in items:
             try:
+                existing_task = self._find_existing_task_for_item(task_model, project, item)
+                if existing_task and not existing_task._restock_task_is_done():
+                    item.sudo().write({"todo_task_id": existing_task.id})
+                    if not existing_task.restock_item_id:
+                        existing_task.sudo().write({"restock_item_id": item.id})
+                    if run_by_partner_id:
+                        existing_task.with_context(
+                            mail_notify_force_send=False,
+                            mail_auto_subscribe_no_notify=True,
+                        ).sudo().message_subscribe(partner_ids=[run_by_partner_id])
+                    self._update_task_description_for_items(existing_task, location=location)
+                    tasks_merged += 1
+                    _logger.info(
+                        "Merged restock item %s into existing task %s", item.id, existing_task.id
+                    )
+                    continue
                 display_title = item.product_title or "Restock Item"
                 if item.variant_title and item.variant_title != "Default Title":
                     display_title += f" - {item.variant_title}"
@@ -724,10 +741,78 @@ class ShopifyRestockService(models.AbstractModel):
                         mail_auto_subscribe_no_notify=True,
                     ).sudo().message_subscribe(partner_ids=[run_by_partner_id])
                 item.sudo().write({"todo_task_id": task.id})
+                self._update_task_description_for_items(task, location=location)
                 tasks_created += 1
             except Exception as e:
                 _logger.exception("Failed to create task for item %s: %s", item.id, e)
-        _logger.info("Created %d tasks for restock run", tasks_created)
+        _logger.info(
+            "Created %d tasks for restock run (%d merged into existing tasks)",
+            tasks_created,
+            tasks_merged,
+        )
+
+    def _find_existing_task_for_item(
+        self,
+        task_model: models.Model,
+        project: models.Model,
+        item: models.Model,
+    ) -> Optional[models.Model]:
+        if not project or not item:
+            return None
+        domain = [("project_id", "=", project.id)]
+        if item.location_id:
+            domain.append(("restock_item_id.location_id", "=", item.location_id.id))
+        if item.product_id_global and item.variant_id_global:
+            domain.extend([
+                ("restock_item_id.product_id_global", "=", item.product_id_global),
+                ("restock_item_id.variant_id_global", "=", item.variant_id_global),
+            ])
+        elif item.product_id_global:
+            domain.append(("restock_item_id.product_id_global", "=", item.product_id_global))
+        elif item.sku:
+            domain.append(("restock_item_id.sku", "=", item.sku))
+        else:
+            domain.extend([
+                ("restock_item_id.product_title", "=", item.product_title or ""),
+                ("restock_item_id.variant_title", "=", item.variant_title or ""),
+            ])
+        candidates = task_model.sudo().search(domain, order="id desc")
+        for task in candidates:
+            if not task._restock_task_is_done():
+                return task
+        return None
+
+    def _update_task_description_for_items(
+        self,
+        task: models.Model,
+        *,
+        location: Optional[models.Model] = None,
+    ) -> None:
+        if not task:
+            return
+        items = self.env["shopify.restock.item"].sudo().search([
+            ("todo_task_id", "=", task.id),
+        ])
+        if not items:
+            return
+        # Use the most recent item as the display source
+        latest_item = items.sorted(lambda rec: rec.id)[-1]
+        total_restock_amount = sum(int(it.restock_amount or 0) for it in items)
+        description_lines = [
+            f"Product: {latest_item.product_title or ''}",
+            f"Variant: {latest_item.variant_title or ''}",
+            f"SKU: {latest_item.sku or ''}",
+            f"Current Qty: {latest_item.current_qty or 0}",
+            f"Restock Level: {latest_item.restock_level or ''}",
+            f"Recommended Order: {total_restock_amount}",
+        ]
+        if latest_item.product_url:
+            description_lines.append(f"Shopify URL: {latest_item.product_url}")
+        if location:
+            description_lines.append(f"Shopify Location: {getattr(location, 'name', '')}")
+        task.sudo().write({
+            "description": "\n".join(filter(None, description_lines)),
+        })
 
     # ---------------------------
     # Email via Odoo's mail server

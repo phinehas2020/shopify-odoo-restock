@@ -63,11 +63,18 @@ class ProjectTask(models.Model):
                     continue
                 if not task._restock_task_is_done():
                     continue
+                items = self.env["shopify.restock.item"].sudo().search([
+                    ("todo_task_id", "=", task.id),
+                ])
+                if not items and task.restock_item_id:
+                    items = task.restock_item_id
+                if not items:
+                    continue
                 _logger.info(
-                    "Restock task %s marked done, triggering inventory transfer for item %s",
-                    task.id, task.restock_item_id.id
+                    "Restock task %s marked done, triggering inventory transfer for items %s",
+                    task.id, items.ids
                 )
-                task.restock_item_id.with_context(
+                items.with_context(
                     transferred_by_uid=self.env.user.id
                 ).sudo().action_transfer_inventory()
             except Exception:

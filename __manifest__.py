@@ -2,7 +2,7 @@
 {
     "name": "Shopify Restock Alerts",
     "summary": "Fetch Shopify inventory, create restock tasks, and transfer inventory when completed",
-    "version": "18.0.1.1.4",
+    "version": "18.0.1.1.5",
     "category": "Inventory/Integration",
     "author": "Custom",
     "license": "LGPL-3",
@@ -22,4 +22,5 @@
     "assets": {},
     "installable": True,
     "application": True,
+    "post_init_hook": "post_init_hook",
 }

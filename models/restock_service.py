@@ -15,6 +15,15 @@ class ShopifyRestockService(models.AbstractModel):
     _name = "shopify.restock.service"
     _description = "Shopify Restock Service"
 
+    def _compute_needed_qty(self, item: models.Model) -> int:
+        restock_qty = int(item.restock_amount or 0)
+        if restock_qty <= 0 and item.restock_level is not None and item.current_qty is not None:
+            try:
+                restock_qty = int(item.restock_level) - int(item.current_qty)
+            except (TypeError, ValueError):
+                restock_qty = 0
+        return max(restock_qty, 0)
+
     def _build_task_title(self, item: models.Model, restock_qty: int) -> str:
         display_title = item.product_title or "Restock Item"
         if item.variant_title and item.variant_title != "Default Title":
@@ -740,19 +749,19 @@ class ShopifyRestockService(models.AbstractModel):
                         "Merged restock item %s into existing task %s", item.id, existing_task.id
                     )
                     continue
+                restock_qty = self._compute_needed_qty(item)
                 description_lines = [
                     f"Product: {item.product_title or ''}",
                     f"Variant: {item.variant_title or ''}",
                     f"SKU: {item.sku or ''}",
                     f"Current Qty: {item.current_qty or 0}",
                     f"Restock Level: {item.restock_level or ''}",
-                    f"Recommended Order: {item.restock_amount or 0}",
+                    f"Recommended Order: {restock_qty}",
                 ]
                 if item.product_url:
                     description_lines.append(f"Shopify URL: {item.product_url}")
                 if location:
                     description_lines.append(f"Shopify Location: {getattr(location, 'name', '')}")
-                restock_qty = int(item.restock_amount or 0)
                 task_vals = {
                     "name": self._build_task_title(item, restock_qty),
                     "description": "\n".join(filter(None, description_lines)),
@@ -835,15 +844,15 @@ class ShopifyRestockService(models.AbstractModel):
             return
         # Use the most recent item as the display source
         latest_item = items.sorted(lambda rec: rec.id)[-1]
-        total_restock_amount = sum(int(it.restock_amount or 0) for it in items)
-        task_title = self._build_task_title(latest_item, total_restock_amount)
+        total_restock_qty = sum(self._compute_needed_qty(it) for it in items)
+        task_title = self._build_task_title(latest_item, total_restock_qty)
         description_lines = [
             f"Product: {latest_item.product_title or ''}",
             f"Variant: {latest_item.variant_title or ''}",
             f"SKU: {latest_item.sku or ''}",
             f"Current Qty: {latest_item.current_qty or 0}",
             f"Restock Level: {latest_item.restock_level or ''}",
-            f"Recommended Order: {total_restock_amount}",
+            f"Recommended Order: {total_restock_qty}",
         ]
         if latest_item.product_url:
             description_lines.append(f"Shopify URL: {latest_item.product_url}")

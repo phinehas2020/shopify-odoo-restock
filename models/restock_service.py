@@ -15,6 +15,12 @@ class ShopifyRestockService(models.AbstractModel):
     _name = "shopify.restock.service"
     _description = "Shopify Restock Service"
 
+    def _build_task_title(self, item: models.Model, restock_qty: int) -> str:
+        display_title = item.product_title or "Restock Item"
+        if item.variant_title and item.variant_title != "Default Title":
+            display_title += f" - {item.variant_title}"
+        return f"{display_title} | {restock_qty}"
+
     # ---------------------------
     # Public entrypoints
     # ---------------------------
@@ -734,9 +740,6 @@ class ShopifyRestockService(models.AbstractModel):
                         "Merged restock item %s into existing task %s", item.id, existing_task.id
                     )
                     continue
-                display_title = item.product_title or "Restock Item"
-                if item.variant_title and item.variant_title != "Default Title":
-                    display_title += f" - {item.variant_title}"
                 description_lines = [
                     f"Product: {item.product_title or ''}",
                     f"Variant: {item.variant_title or ''}",
@@ -749,8 +752,9 @@ class ShopifyRestockService(models.AbstractModel):
                     description_lines.append(f"Shopify URL: {item.product_url}")
                 if location:
                     description_lines.append(f"Shopify Location: {getattr(location, 'name', '')}")
+                restock_qty = int(item.restock_amount or 0)
                 task_vals = {
-                    "name": f"Restock: {display_title}",
+                    "name": self._build_task_title(item, restock_qty),
                     "description": "\n".join(filter(None, description_lines)),
                     "project_id": project.id if project else False,
                     "restock_item_id": item.id,
@@ -832,6 +836,7 @@ class ShopifyRestockService(models.AbstractModel):
         # Use the most recent item as the display source
         latest_item = items.sorted(lambda rec: rec.id)[-1]
         total_restock_amount = sum(int(it.restock_amount or 0) for it in items)
+        task_title = self._build_task_title(latest_item, total_restock_amount)
         description_lines = [
             f"Product: {latest_item.product_title or ''}",
             f"Variant: {latest_item.variant_title or ''}",
@@ -845,6 +850,7 @@ class ShopifyRestockService(models.AbstractModel):
         if location:
             description_lines.append(f"Shopify Location: {getattr(location, 'name', '')}")
         task.sudo().write({
+            "name": task_title,
             "description": "\n".join(filter(None, description_lines)),
         })
 

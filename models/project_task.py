@@ -24,21 +24,16 @@ class ProjectTask(models.Model):
         - '02_changes_requested' - Changes Requested (open)
         - '03_approved' - Approved (open)
         - '04_waiting' - Waiting (open)
-        - '1_done' - Done (CLOSED)
-        - '1_canceled' - Canceled (CLOSED)
+        - '1_done' - Done (CLOSED and transferable)
+        - '1_canceled' - Canceled (CLOSED and non-transferable)
 
-        Falls back to stage.fold for older versions.
+        Falls back to stage.fold/is_closed for older versions where state is absent.
         """
         self.ensure_one()
 
-        # Odoo 18+ uses 'state' field - closed states start with '1_'
+        # Odoo 18+ uses 'state' field. Only true done should transfer inventory.
         if "state" in self._fields and self.state:
-            # Closed states: '1_done', '1_canceled'
-            if self.state in ('1_done', '1_canceled'):
-                return True
-            # If state exists and is an open state, task is NOT done
-            if self.state in ('01_in_progress', '02_changes_requested', '03_approved', '04_waiting'):
-                return False
+            return self.state == "1_done"
 
         # Fallback for older Odoo versions: check stage
         stage = self.stage_id
@@ -65,8 +60,15 @@ class ProjectTask(models.Model):
                     continue
                 items = self.env["shopify.restock.item"].sudo().search([
                     ("todo_task_id", "=", task.id),
+                    ("is_active_snapshot", "=", True),
+                    ("inventory_transferred", "=", False),
                 ])
-                if not items and task.restock_item_id:
+                if (
+                    not items
+                    and task.restock_item_id
+                    and task.restock_item_id.is_active_snapshot
+                    and not task.restock_item_id.inventory_transferred
+                ):
                     items = task.restock_item_id
                 if not items:
                     continue

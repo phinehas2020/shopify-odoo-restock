@@ -2,7 +2,7 @@
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
 from odoo import api, fields, models
@@ -30,6 +30,135 @@ class ShopifyRestockService(models.AbstractModel):
             display_title += f" - {item.variant_title}"
         return f"{display_title} | {restock_qty}"
 
+    def _normalize_identity_piece(self, value: Any) -> str:
+        return str(value or "").strip().lower()
+
+    def _compute_identity_key(
+        self,
+        *,
+        location_id: Optional[int],
+        variant_id_global: Any = None,
+        product_id_global: Any = None,
+        sku: Any = None,
+        product_title: Any = None,
+        variant_title: Any = None,
+    ) -> str:
+        loc_piece = str(int(location_id)) if location_id else "0"
+        variant_piece = self._normalize_identity_piece(variant_id_global)
+        product_piece = self._normalize_identity_piece(product_id_global)
+        sku_piece = self._normalize_identity_piece(sku)
+        if variant_piece:
+            identity_piece = f"variant:{variant_piece}"
+        elif product_piece and sku_piece:
+            identity_piece = f"product:{product_piece}|sku:{sku_piece}"
+        elif product_piece:
+            identity_piece = f"product:{product_piece}"
+        elif sku_piece:
+            identity_piece = f"sku:{sku_piece}"
+        else:
+            product_title_piece = self._normalize_identity_piece(product_title)
+            variant_title_piece = self._normalize_identity_piece(variant_title)
+            identity_piece = f"title:{product_title_piece}|variant:{variant_title_piece}"
+        return f"loc:{loc_piece}|{identity_piece}"
+
+    def _identity_key_for_alert(self, alert_item: Dict[str, Any], location: Optional[models.Model]) -> str:
+        return self._compute_identity_key(
+            location_id=location.id if location else None,
+            variant_id_global=alert_item.get("variant_id"),
+            product_id_global=alert_item.get("product_id"),
+            sku=alert_item.get("sku"),
+            product_title=alert_item.get("product_title"),
+            variant_title=alert_item.get("variant_title"),
+        )
+
+    def _identity_key_for_item(self, item: models.Model) -> str:
+        return self._compute_identity_key(
+            location_id=item.location_id.id if item.location_id else None,
+            variant_id_global=item.variant_id_global,
+            product_id_global=item.product_id_global,
+            sku=item.sku,
+            product_title=item.product_title,
+            variant_title=item.variant_title,
+        )
+
+    def _run_snapshot_backfill_once(self) -> None:
+        """Backfill snapshot metadata for legacy items exactly once."""
+        ICP = self.env["ir.config_parameter"].sudo()
+        flag_key = "odoo_shopify_restock.snapshot_backfill_done"
+        if ICP.get_param(flag_key) == "1":
+            return
+
+        item_model = self.env["shopify.restock.item"].sudo()
+        all_items = item_model.search([], order="id asc")
+        if not all_items:
+            ICP.set_param(flag_key, "1")
+            return
+
+        now = fields.Datetime.now()
+        for item in all_items:
+            updates: Dict[str, Any] = {}
+            if not item.identity_key:
+                updates["identity_key"] = self._identity_key_for_item(item)
+            if item.inventory_transferred and item.is_active_snapshot:
+                updates["is_active_snapshot"] = False
+                if not item.superseded_reason:
+                    updates["superseded_reason"] = "transferred"
+                if not item.superseded_at:
+                    updates["superseded_at"] = item.inventory_transferred_at or now
+            if updates:
+                item.sudo().write(updates)
+
+        grouped_items: Dict[Tuple[int, str], List[models.Model]] = {}
+        candidates = item_model.search([
+            ("todo_task_id", "!=", False),
+            ("inventory_transferred", "=", False),
+        ], order="id desc")
+        for item in candidates:
+            task = item.todo_task_id
+            if not task:
+                continue
+            if task._restock_task_is_done():
+                continue
+            if "state" in task._fields and task.state == "1_canceled":
+                continue
+            identity_key = item.identity_key or self._identity_key_for_item(item)
+            if not identity_key:
+                continue
+            grouped_items.setdefault((task.id, identity_key), []).append(item)
+
+        for (_task_id, _identity_key), grouped in grouped_items.items():
+            keep_item = grouped[0]
+            if (
+                not keep_item.is_active_snapshot
+                or keep_item.superseded_reason
+                or keep_item.superseded_by_item_id
+                or keep_item.superseded_at
+            ):
+                keep_item.sudo().write({
+                    "is_active_snapshot": True,
+                    "superseded_by_item_id": False,
+                    "superseded_at": False,
+                    "superseded_reason": False,
+                })
+            for old_item in grouped[1:]:
+                updates: Dict[str, Any] = {}
+                if old_item.is_active_snapshot:
+                    updates["is_active_snapshot"] = False
+                if not old_item.superseded_by_item_id:
+                    updates["superseded_by_item_id"] = keep_item.id
+                if not old_item.superseded_at:
+                    updates["superseded_at"] = now
+                if not old_item.superseded_reason:
+                    updates["superseded_reason"] = "legacy_backfill"
+                if updates:
+                    old_item.sudo().write(updates)
+            task = keep_item.todo_task_id
+            if task and task.restock_item_id.id != keep_item.id:
+                task.sudo().write({"restock_item_id": keep_item.id})
+
+        ICP.set_param(flag_key, "1")
+        _logger.info("Completed snapshot metadata backfill for %s restock items", len(all_items))
+
     # ---------------------------
     # Public entrypoints
     # ---------------------------
@@ -45,6 +174,10 @@ class ShopifyRestockService(models.AbstractModel):
 
     def _run_restock_check_internal(self, send_email: bool = True, email_to_override: str | None = None) -> Dict[str, Any]:
         settings = self._load_settings()
+        try:
+            self._run_snapshot_backfill_once()
+        except Exception:  # pylint: disable=broad-except
+            _logger.exception("Snapshot backfill failed; continuing with current run")
         result: Dict[str, Any]
         email_to_override = (email_to_override or "").strip() or None
         actual_email_to = email_to_override or settings.get("email_to")
@@ -96,10 +229,25 @@ class ShopifyRestockService(models.AbstractModel):
                 "urgency": item.get("urgency") or "low",
                 "product_id_global": item.get("product_id"),
                 "variant_id_global": item.get("variant_id"),
+                "identity_key": self._identity_key_for_alert(item, location),
+                "is_active_snapshot": True,
             })
+        project: Optional[models.Model] = None
         if items_vals:
             items = self.env["shopify.restock.item"].sudo().create(items_vals)
-            self._create_tasks_for_items(settings, items, run, location)
+            project = self._create_tasks_for_items(settings, items, run, location)
+            if not result.get("error"):
+                current_identity_keys = {
+                    key for key in items.mapped("identity_key") if key
+                }
+                self._deactivate_resolved_snapshots(
+                    project,
+                    location,
+                    current_identity_keys,
+                )
+        elif not result.get("error"):
+            project = self._get_restock_project(settings, create_if_missing=False)
+            self._deactivate_resolved_snapshots(project, location, set())
         return result
 
     @api.model
@@ -577,7 +725,7 @@ class ShopifyRestockService(models.AbstractModel):
                 return employee.user_id.id
         return None
 
-    def _get_restock_project(self, settings: Dict[str, str]) -> models.Model:
+    def _get_restock_project(self, settings: Dict[str, str], create_if_missing: bool = True) -> models.Model:
         project_id = settings.get("project_id")
         if project_id and str(project_id).isdigit():
             project = self.env["project.project"].sudo().browse(int(project_id))
@@ -586,6 +734,8 @@ class ShopifyRestockService(models.AbstractModel):
                 self._ensure_runner_project_access(project)
                 return project
         project = self.env["project.project"].sudo().search([("name", "=", "Shopify Restock")], limit=1)
+        if not project and not create_if_missing:
+            return project
         if not project:
             project = self.env["project.project"].sudo().create({
                 "name": "Shopify Restock",
@@ -711,10 +861,10 @@ class ShopifyRestockService(models.AbstractModel):
         items: models.Model,
         run: models.Model,
         location: Optional[models.Model] = None,
-    ) -> None:
+    ) -> Optional[models.Model]:
         if not items:
             _logger.warning("No items to create tasks for")
-            return
+            return None
         _logger.info("Creating tasks for %d restock items", len(items))
         project = self._get_restock_project(settings)
         user_id = self._get_task_user_id(settings)
@@ -734,10 +884,16 @@ class ShopifyRestockService(models.AbstractModel):
         for item in items:
             try:
                 existing_task = self._find_existing_task_for_item(task_model, project, item)
-                if existing_task and not existing_task._restock_task_is_done():
-                    item.sudo().write({"todo_task_id": existing_task.id})
-                    if not existing_task.restock_item_id:
-                        existing_task.sudo().write({"restock_item_id": item.id})
+                if existing_task:
+                    self._supersede_task_snapshots(existing_task, item)
+                    item.sudo().write({
+                        "todo_task_id": existing_task.id,
+                        "is_active_snapshot": True,
+                        "superseded_by_item_id": False,
+                        "superseded_at": False,
+                        "superseded_reason": False,
+                    })
+                    existing_task.sudo().write({"restock_item_id": item.id})
                     if run_by_partner_id:
                         existing_task.with_context(
                             mail_notify_force_send=False,
@@ -797,6 +953,76 @@ class ShopifyRestockService(models.AbstractModel):
             tasks_created,
             tasks_merged,
         )
+        return project
+
+    def _supersede_task_snapshots(self, task: models.Model, incoming_item: models.Model) -> None:
+        if not task or not incoming_item or not incoming_item.identity_key:
+            return
+        superseded_items = self.env["shopify.restock.item"].sudo().search([
+            ("todo_task_id", "=", task.id),
+            ("identity_key", "=", incoming_item.identity_key),
+            ("is_active_snapshot", "=", True),
+            ("inventory_transferred", "=", False),
+            ("id", "!=", incoming_item.id),
+        ])
+        if not superseded_items:
+            return
+        superseded_items.sudo().write({
+            "is_active_snapshot": False,
+            "superseded_by_item_id": incoming_item.id,
+            "superseded_at": fields.Datetime.now(),
+            "superseded_reason": "replaced_by_new_run",
+        })
+
+    def _deactivate_resolved_snapshots(
+        self,
+        project: Optional[models.Model],
+        location: Optional[models.Model],
+        current_identity_keys: Set[str],
+    ) -> None:
+        if not project:
+            return
+        domain = [
+            ("todo_task_id", "!=", False),
+            ("todo_task_id.project_id", "=", project.id),
+            ("is_active_snapshot", "=", True),
+            ("inventory_transferred", "=", False),
+        ]
+        if location:
+            domain.append(("location_id", "=", location.id))
+        else:
+            domain.append(("location_id", "=", False))
+
+        candidates = self.env["shopify.restock.item"].sudo().search(domain, order="id desc")
+        to_deactivate_ids: List[int] = []
+        for item in candidates:
+            task = item.todo_task_id
+            if not task:
+                continue
+            if task._restock_task_is_done():
+                continue
+            if "state" in task._fields and task.state == "1_canceled":
+                continue
+            if not item.identity_key:
+                continue
+            if item.identity_key in current_identity_keys:
+                continue
+            to_deactivate_ids.append(item.id)
+
+        if not to_deactivate_ids:
+            return
+
+        self.env["shopify.restock.item"].sudo().browse(to_deactivate_ids).write({
+            "is_active_snapshot": False,
+            "superseded_by_item_id": False,
+            "superseded_at": fields.Datetime.now(),
+            "superseded_reason": "no_longer_in_alerts",
+        })
+        _logger.info(
+            "Deactivated %d stale snapshots for project %s",
+            len(to_deactivate_ids),
+            project.id,
+        )
 
     def _find_existing_task_for_item(
         self,
@@ -806,27 +1032,34 @@ class ShopifyRestockService(models.AbstractModel):
     ) -> Optional[models.Model]:
         if not project or not item:
             return None
-        domain = [("project_id", "=", project.id)]
-        if item.location_id:
-            domain.append(("restock_item_id.location_id", "=", item.location_id.id))
-        if item.product_id_global and item.variant_id_global:
-            domain.extend([
-                ("restock_item_id.product_id_global", "=", item.product_id_global),
-                ("restock_item_id.variant_id_global", "=", item.variant_id_global),
-            ])
-        elif item.product_id_global:
-            domain.append(("restock_item_id.product_id_global", "=", item.product_id_global))
-        elif item.sku:
-            domain.append(("restock_item_id.sku", "=", item.sku))
-        else:
-            domain.extend([
-                ("restock_item_id.product_title", "=", item.product_title or ""),
-                ("restock_item_id.variant_title", "=", item.variant_title or ""),
-            ])
-        candidates = task_model.sudo().search(domain, order="id desc")
-        for task in candidates:
-            if not task._restock_task_is_done():
-                return task
+        identity_key = item.identity_key or self._identity_key_for_item(item)
+        if not identity_key:
+            return None
+
+        candidate_items = self.env["shopify.restock.item"].sudo().search([
+            ("identity_key", "=", identity_key),
+            ("todo_task_id", "!=", False),
+        ], order="id desc")
+        for candidate in candidate_items:
+            task = candidate.todo_task_id
+            if not task or task.project_id.id != project.id:
+                continue
+            if "state" in task._fields and task.state == "1_canceled":
+                continue
+            if task._restock_task_is_done():
+                continue
+            return task
+
+        task_candidates = task_model.sudo().search([
+            ("project_id", "=", project.id),
+            ("restock_item_id.identity_key", "=", identity_key),
+        ], order="id desc")
+        for task in task_candidates:
+            if "state" in task._fields and task.state == "1_canceled":
+                continue
+            if task._restock_task_is_done():
+                continue
+            return task
         return None
 
     def _update_task_description_for_items(
@@ -837,22 +1070,23 @@ class ShopifyRestockService(models.AbstractModel):
     ) -> None:
         if not task:
             return
-        items = self.env["shopify.restock.item"].sudo().search([
+        active_item = self.env["shopify.restock.item"].sudo().search([
             ("todo_task_id", "=", task.id),
-        ])
-        if not items:
+            ("is_active_snapshot", "=", True),
+            ("inventory_transferred", "=", False),
+        ], order="id desc", limit=1)
+        latest_item = active_item or task.restock_item_id
+        if not latest_item:
             return
-        # Use the most recent item as the display source
-        latest_item = items.sorted(lambda rec: rec.id)[-1]
-        total_restock_qty = sum(self._compute_needed_qty(it) for it in items)
-        task_title = self._build_task_title(latest_item, total_restock_qty)
+        restock_qty = self._compute_needed_qty(latest_item)
+        task_title = self._build_task_title(latest_item, restock_qty)
         description_lines = [
             f"Product: {latest_item.product_title or ''}",
             f"Variant: {latest_item.variant_title or ''}",
             f"SKU: {latest_item.sku or ''}",
             f"Current Qty: {latest_item.current_qty or 0}",
             f"Restock Level: {latest_item.restock_level or ''}",
-            f"Recommended Order: {total_restock_qty}",
+            f"Recommended Order: {restock_qty}",
         ]
         if latest_item.product_url:
             description_lines.append(f"Shopify URL: {latest_item.product_url}")

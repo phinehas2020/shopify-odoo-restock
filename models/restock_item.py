@@ -38,6 +38,21 @@ class ShopifyRestockItem(models.Model):
 
     product_id_global = fields.Char()
     variant_id_global = fields.Char()
+    identity_key = fields.Char(index=True, copy=False)
+    is_active_snapshot = fields.Boolean(
+        string="Active Snapshot",
+        default=True,
+        index=True,
+        copy=False,
+    )
+    superseded_by_item_id = fields.Many2one(
+        comodel_name="shopify.restock.item",
+        string="Superseded By",
+        ondelete="set null",
+        copy=False,
+    )
+    superseded_at = fields.Datetime(copy=False)
+    superseded_reason = fields.Char(copy=False)
 
     todo_task_id = fields.Many2one(
         comodel_name="project.task",
@@ -156,9 +171,48 @@ class ShopifyRestockItem(models.Model):
         move._action_done()
         return move
 
+    def _dedupe_transfer_candidates(self):
+        """Keep only the newest active snapshot per task/identity before transfer."""
+        active_items = self.filtered(
+            lambda item: item.is_active_snapshot and not item.inventory_transferred
+        )
+        if not active_items:
+            return self.env["shopify.restock.item"]
+
+        latest_by_key = {}
+        duplicates_by_id = {}
+        for item in active_items.sorted(lambda rec: rec.id, reverse=True):
+            task_key = item.todo_task_id.id or item.id
+            identity_piece = item.identity_key or f"item:{item.id}"
+            dedupe_key = (task_key, identity_piece)
+            if dedupe_key in latest_by_key:
+                duplicates_by_id[item.id] = latest_by_key[dedupe_key].id
+                continue
+            latest_by_key[dedupe_key] = item
+
+        if duplicates_by_id:
+            now = fields.Datetime.now()
+            for duplicate_id, keeper_id in duplicates_by_id.items():
+                self.browse(duplicate_id).sudo().write({
+                    "is_active_snapshot": False,
+                    "superseded_by_item_id": keeper_id,
+                    "superseded_at": now,
+                    "superseded_reason": "deduped_before_transfer",
+                })
+            _logger.warning(
+                "Deduped %s duplicate active restock snapshots before transfer: %s",
+                len(duplicates_by_id),
+                duplicates_by_id,
+            )
+
+        return self.browse([item.id for item in latest_by_key.values()])
+
     def action_transfer_inventory(self):
         """Transfer inventory from warehouse to retail location when restock task is completed."""
-        for item in self:
+        for item in self._dedupe_transfer_candidates():
+            if not item.is_active_snapshot:
+                _logger.debug("Item %s snapshot is inactive, skipping transfer", item.id)
+                continue
             if item.inventory_transferred:
                 _logger.debug("Item %s already transferred, skipping", item.id)
                 continue
@@ -203,11 +257,16 @@ class ShopifyRestockItem(models.Model):
                 })
                 continue
             transferred_by_uid = item.env.context.get("transferred_by_uid") or item.env.user.id
+            transferred_at = fields.Datetime.now()
             item.sudo().write({
                 "inventory_move_id": move.id,
                 "inventory_transferred": True,
-                "inventory_transferred_at": fields.Datetime.now(),
+                "inventory_transferred_at": transferred_at,
                 "inventory_transferred_by": transferred_by_uid,
                 "inventory_transfer_error": False,
+                "is_active_snapshot": False,
+                "superseded_by_item_id": False,
+                "superseded_at": transferred_at,
+                "superseded_reason": "transferred",
             })
             _logger.info("Successfully transferred inventory for restock item %s (move %s)", item.id, move.id)

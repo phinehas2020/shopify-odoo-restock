@@ -15,6 +15,11 @@
         <field name="current_qty"/>
         <field name="restock_level"/>
         <field name="restock_amount"/>
+        <field name="identity_key"/>
+        <field name="is_active_snapshot"/>
+        <field name="superseded_reason"/>
+        <field name="superseded_by_item_id"/>
+        <field name="superseded_at"/>
         <field name="todo_task_id"/>
         <field name="task_state"/>
         <field name="inventory_transferred"/>
@@ -43,6 +48,13 @@
             <field name="current_qty"/>
             <field name="restock_level"/>
             <field name="restock_amount"/>
+          </group>
+          <group string="Snapshot Lifecycle">
+            <field name="identity_key"/>
+            <field name="is_active_snapshot"/>
+            <field name="superseded_reason"/>
+            <field name="superseded_by_item_id"/>
+            <field name="superseded_at"/>
           </group>
           <group string="Task Status">
             <field name="todo_task_id"/>

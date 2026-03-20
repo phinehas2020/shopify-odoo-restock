@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
+from zoneinfo import ZoneInfo
 
 import requests
 from odoo import api, fields, models
@@ -10,10 +11,40 @@ from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
+SCHEDULE_DAY_PARAM_KEYS = (
+    (0, "odoo_shopify_restock.schedule_monday"),
+    (1, "odoo_shopify_restock.schedule_tuesday"),
+    (2, "odoo_shopify_restock.schedule_wednesday"),
+    (3, "odoo_shopify_restock.schedule_thursday"),
+    (4, "odoo_shopify_restock.schedule_friday"),
+    (5, "odoo_shopify_restock.schedule_saturday"),
+    (6, "odoo_shopify_restock.schedule_sunday"),
+)
+
 
 class ShopifyRestockService(models.AbstractModel):
     _name = "shopify.restock.service"
     _description = "Shopify Restock Service"
+
+    def _config_param_as_bool(self, key: str, default: bool = False) -> bool:
+        value = self.env["ir.config_parameter"].sudo().get_param(key)
+        if value in (None, ""):
+            return default
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _config_param_as_int(self, key: str, default: int = 0) -> int:
+        value = self.env["ir.config_parameter"].sudo().get_param(key)
+        try:
+            return int(value or default)
+        except (TypeError, ValueError):
+            return default
+
+    def _config_param_as_float(self, key: str, default: float = 0.0) -> float:
+        value = self.env["ir.config_parameter"].sudo().get_param(key)
+        try:
+            return float(value or default)
+        except (TypeError, ValueError):
+            return default
 
     def _compute_needed_qty(self, item: models.Model) -> int:
         restock_qty = int(item.restock_amount or 0)
@@ -333,6 +364,136 @@ class ShopifyRestockService(models.AbstractModel):
             "project_id": project_id.strip(),
             "odoo_location_id": odoo_location_id.strip(),
         }
+
+    def _load_schedule_settings(self) -> Dict[str, Any]:
+        ICP = self.env["ir.config_parameter"].sudo()
+        selected_weekdays = [
+            weekday_index
+            for weekday_index, param_key in SCHEDULE_DAY_PARAM_KEYS
+            if self._config_param_as_bool(param_key, default=weekday_index < 5)
+        ]
+        schedule_time = self._config_param_as_float(
+            "odoo_shopify_restock.schedule_time",
+            default=9.0,
+        )
+        scheduled_minutes = int(round(schedule_time * 60))
+        scheduled_minutes = min(max(scheduled_minutes, 0), 23 * 60 + 59)
+
+        employee = self.env["hr.employee"].sudo().browse(
+            self._config_param_as_int("odoo_shopify_restock.schedule_employee_id")
+        )
+        location = self.env["shopify.restock.location"].sudo().browse(
+            self._config_param_as_int("odoo_shopify_restock.schedule_location_id")
+        )
+
+        return {
+            "enabled": self._config_param_as_bool(
+                "odoo_shopify_restock.schedule_enabled",
+                default=False,
+            ),
+            "selected_weekdays": selected_weekdays,
+            "schedule_time": scheduled_minutes / 60.0,
+            "scheduled_minutes": scheduled_minutes,
+            "timezone_name": (
+                ICP.get_param("odoo_shopify_restock.schedule_timezone")
+                or self.env.user.tz
+                or self.env.context.get("tz")
+                or "UTC"
+            ),
+            "employee": employee if employee.exists() else self.env["hr.employee"],
+            "location": location if location.exists() else self.env["shopify.restock.location"],
+            "owner_user_id": self._config_param_as_int(
+                "odoo_shopify_restock.schedule_owner_user_id",
+                default=self.env.user.id,
+            ),
+            "last_run_on": ICP.get_param("odoo_shopify_restock.schedule_last_run_on") or "",
+        }
+
+    def _get_schedule_timezone(self, timezone_name: str):
+        try:
+            return ZoneInfo(timezone_name or "UTC")
+        except Exception:  # pylint: disable=broad-except
+            _logger.warning("Unknown schedule timezone '%s'; falling back to UTC", timezone_name)
+            return timezone.utc
+
+    def _get_schedule_local_now(self, timezone_name: str) -> datetime:
+        now_utc = fields.Datetime.now().replace(tzinfo=timezone.utc)
+        return now_utc.astimezone(self._get_schedule_timezone(timezone_name))
+
+    @api.model
+    def sync_schedule_cron(self) -> bool:
+        cron = self.env.ref("odoo_shopify_restock.ir_cron_shopify_restock", raise_if_not_found=False)
+        if not cron:
+            return False
+
+        schedule = self._load_schedule_settings()
+        next_poll = (
+            fields.Datetime.now().replace(tzinfo=timezone.utc) + timedelta(minutes=1)
+        ).replace(second=0, microsecond=0, tzinfo=None)
+
+        cron_vals = {
+            "interval_number": 1,
+            "interval_type": "minutes",
+            "active": bool(schedule["enabled"] and schedule["selected_weekdays"]),
+            "nextcall": fields.Datetime.to_string(next_poll),
+        }
+        if "numbercall" in cron._fields:
+            cron_vals["numbercall"] = -1
+        if "doall" in cron._fields:
+            cron_vals["doall"] = False
+        cron.sudo().write(cron_vals)
+        return True
+
+    @api.model
+    def run_scheduled_restock_check(self) -> Dict[str, Any]:
+        schedule = self._load_schedule_settings()
+        if not schedule["enabled"]:
+            return {"scheduled": False, "reason": "disabled"}
+        if not schedule["selected_weekdays"]:
+            return {"scheduled": False, "reason": "no_days_selected"}
+
+        local_now = self._get_schedule_local_now(schedule["timezone_name"])
+        current_day_key = local_now.date().isoformat()
+        if local_now.weekday() not in schedule["selected_weekdays"]:
+            return {"scheduled": False, "reason": "weekday_not_selected"}
+
+        current_minutes = local_now.hour * 60 + local_now.minute
+        if current_minutes < schedule["scheduled_minutes"]:
+            return {"scheduled": False, "reason": "before_scheduled_time"}
+        if schedule["last_run_on"] == current_day_key:
+            return {"scheduled": False, "reason": "already_ran_today"}
+
+        employee = schedule["employee"]
+        location = schedule["location"]
+        email_to_override = ""
+        run_context = dict(
+            self.env.context,
+            restock_run_by_uid=schedule["owner_user_id"] or self.env.user.id,
+        )
+        if employee:
+            run_context["restock_employee_id"] = employee.id
+            if employee.user_id:
+                run_context["restock_user_id"] = employee.user_id.id
+            email_to_override = (employee.work_email or "").strip()
+        if location and location.location_id_numeric:
+            run_context["shopify_restock_location"] = location
+
+        _logger.info(
+            "Running scheduled Shopify restock check for weekday %s at %s (%s)",
+            local_now.weekday(),
+            local_now.strftime("%H:%M"),
+            schedule["timezone_name"],
+        )
+        try:
+            return self.with_context(run_context).run_restock_check(
+                send_email=bool(email_to_override),
+                email_to_override=email_to_override or None,
+            )
+        finally:
+            self.env["ir.config_parameter"].sudo().set_param(
+                "odoo_shopify_restock.schedule_last_run_on",
+                current_day_key,
+            )
 
     # ---------------------------
     # Core logic adapted from user's script

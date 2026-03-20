@@ -24,6 +24,24 @@
             <field name="restock_odoo_location_id" placeholder="e.g. Retail/Stock (store)"/>
           </group>
         </group>
+        <group string="Automatic Schedule">
+          <group>
+            <field name="restock_schedule_enabled"/>
+            <field name="restock_schedule_employee_id" invisible="not restock_schedule_enabled"/>
+            <field name="restock_schedule_location_id" invisible="not restock_schedule_enabled"/>
+            <field name="restock_schedule_time" widget="float_time" invisible="not restock_schedule_enabled"/>
+            <field name="restock_schedule_timezone" readonly="1" invisible="not restock_schedule_enabled"/>
+          </group>
+          <group string="Run On" invisible="not restock_schedule_enabled">
+            <field name="restock_schedule_monday"/>
+            <field name="restock_schedule_tuesday"/>
+            <field name="restock_schedule_wednesday"/>
+            <field name="restock_schedule_thursday"/>
+            <field name="restock_schedule_friday"/>
+            <field name="restock_schedule_saturday"/>
+            <field name="restock_schedule_sunday"/>
+          </group>
+        </group>
         <footer>
           <button string="Save" type="object" name="execute" class="btn-primary"/>
           <button string="Close" class="btn-secondary" special="cancel"/>

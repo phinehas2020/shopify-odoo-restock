@@ -4,9 +4,9 @@
     <field name="name">Shopify Restock Check</field>
     <field name="model_id" ref="base.model_ir_cron"/>
     <field name="state">code</field>
-    <field name="code">env['shopify.restock.service'].run_restock_check(send_email=True)</field>
+    <field name="code">env['shopify.restock.service'].run_scheduled_restock_check()</field>
     <field name="interval_number">1</field>
-    <field name="interval_type">days</field>
+    <field name="interval_type">minutes</field>
     <field name="active">0</field>
   </record>
 </odoo>
